@@ -23,7 +23,7 @@ separate opt-in path.
 | Diagram | Coherent with code means | Ground truth |
 |---|---|---|
 | Architecture / component / flowchart | boxes = real modules/services; arrows = real dependencies | import/dependency graph (tree-sitter) |
-| Sequence | participants = real components; messages = real calls/endpoints | call graph / route table |
+| Sequence | participants = real components; messages = real calls, **in order** (→ sequence alignment) | call graph / route table |
 | Class | classes/methods/relations exist | AST types |
 | ER | entities/fields = schema | DB models / migrations |
 | State | states/transitions = a real state machine | enum + transition code |
@@ -46,6 +46,60 @@ For Mermaid/PlantUML/DOT:
 
 Edge diffs are exactly what humans miss by eye.
 
+The graph-diff above is right for **graph-shaped** diagrams (architecture,
+component, class, ER) — order doesn't matter, only the node/edge sets. It is the
+wrong tool for **ordered** diagrams, below.
+
+## Ordered diagrams: sequence alignment
+
+A `sequenceDiagram` is not a set of edges — it's an **ordered list of messages**
+(A→B, B→C, …). Set-diff throws away order, which is the entire point of a
+sequence diagram. The right tool is **sequence alignment** (an adapted
+Needleman–Wunsch / Smith–Waterman), the one technique that compares two ordered
+sequences while handling insertions and deletions gracefully.
+
+Align the diagram's message sequence to the code's actual call sequence in the
+relevant function:
+
+- **match** — step present, right order → coherent
+- **deletion** (gap in code) — diagram shows a step the code doesn't do →
+  **missing step** / `contradicted`
+- **insertion** (gap in diagram) — code makes a call the diagram omits →
+  **undrawn step**
+- **mismatch / transposition** — wrong call, or right calls out of order
+
+The alignment trace *is* the explanation: "diagram step 3 `validate()` has no
+matching call; code inserts `rateLimit()` between steps 2 and 3" — far better UX
+than a score.
+
+### The adaptation (open-vocabulary tokens)
+
+Genomic alignment uses a fixed substitution matrix over a tiny alphabet. Our
+"symbols" are calls / messages — open-vocabulary and fuzzy — so:
+
+- **Substitution score = semantic similarity**, not a fixed matrix: tokens match
+  by resolved symbol identity, or (when names differ) by **embedding cosine**, so
+  "diagram: *authenticate user*" aligns to code `auth.login()` with a soft score.
+  This is Layer 2's second use.
+- **Affine gaps** (open vs extend penalty) so a run of ignorable calls (logging,
+  metrics) doesn't tank the alignment — same reason bio uses them for indels.
+- **Global (NW)** for "the whole documented flow should match the whole code
+  path"; **local (SW)** for "find where this documented subsequence appears in a
+  large handler."
+
+The same matcher serves **procedural / install / runbook docs** (ordered steps
+vs the real setup script / Dockerfile / CI) even though those aren't diagrams —
+it's a shared engine for any ordered artifact, not just sequence diagrams.
+
+**Not** for graph-shaped diagrams: the right relative there is graph edit
+distance, never sequence alignment. Don't align a DSM.
+
+**Prerequisite + priority:** needs an **ordered call-sequence extractor**
+(tree-sitter, with control flow) that doesn't exist yet — a phase-2 refinement on
+top of the core extractor, not foundational. The DP itself is trivial (O(nm) on
+5–50-step sequences); the real work is canonicalizing calls into comparable
+tokens, which sequence-diagram support needs anyway.
+
 ## Layer mapping
 
 - **Layer 1 (deterministic):** parse the diagram; match node labels to real
@@ -53,7 +107,9 @@ Edge diffs are exactly what humans miss by eye.
 - **Layer 2 (retrieval):** fuzzy labels ("Auth Service", "Worker") with no exact
   name match → embed + retrieve the most likely code unit.
 - **Layer 3 (LLM judge):** semantic structure mismatches — "diagram shows
-  API → DB direct, but code routes through a cache"; sequence-message ordering.
+  API → DB direct, but code routes through a cache." (Sequence *ordering* is
+  handled deterministically by alignment once calls resolve; the judge only
+  enters for genuinely semantic mismatches.)
 
 `ml` only enters for fuzzy label→code matching, never for parsing the diagram.
 
@@ -67,6 +123,9 @@ Edge diffs are exactly what humans miss by eye.
   defer full grammar.
 - Import graph: tree-sitter per language → emit module→module edges (shared with
   the Layer 2 chunker work).
+- Sequence diagrams: an ordered call-sequence extractor (tree-sitter + control
+  flow) + an alignment module (adapted NW/SW, affine gaps, similarity-scored
+  substitution) — reused for procedural-doc checks. Phase 2.
 - Emit `Finding`s with the existing verdict types (`Stale`, `Contradicted`,
   `Unverifiable`).
 
