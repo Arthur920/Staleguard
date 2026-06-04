@@ -73,9 +73,15 @@ doc-aligner check --format json   # machine-readable findings
 doc-aligner check --layer 1       # deterministic only (no API key needed)
 ```
 
-## Install (dev)
+## Build (dev)
 
 ```bash
-pip install -e ".[dev]"
-pytest
+cargo build              # debug binary at target/debug/doc-aligner
+cargo test               # unit tests (layer 1)
+cargo run -- check .     # run against this repo
+cargo install --path .   # install the `doc-aligner` binary
 ```
+
+Layer 1 (deterministic) builds with no extra features. Layers 2–3 (retrieval +
+LLM judge) will land behind an `ml` cargo feature so the default build stays
+lean.
