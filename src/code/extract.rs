@@ -1,6 +1,7 @@
 //! Per-file extraction: symbols via tree-sitter-tags, dependency edges via a
 //! small per-language import query.
 
+use std::ops::Range;
 use std::path::Path;
 
 use streaming_iterator::StreamingIterator;
@@ -10,14 +11,24 @@ use tree_sitter_tags::TagsContext;
 use crate::code::lang::{self, Language};
 use crate::code::symbol::{DepEdge, Facts, Span, Symbol, SymbolKind, Visibility};
 
-/// Extract symbols and dependency edges from one file. Unparseable files and
-/// unsupported languages yield empty results rather than erroring.
-pub fn extract_file(path: &Path, repo_root: &Path) -> (Vec<Symbol>, Vec<DepEdge>) {
+/// A reference whose enclosing definition has been resolved intra-file. `from`
+/// is the enclosing symbol's `qualified_name` (or the module path for top-level
+/// references); `name` is the referenced identifier, resolved to a target symbol
+/// globally in [`CodeIndex::build`]. Internal to the extractor.
+pub(crate) struct RawRef {
+    pub from: String,
+    pub name: String,
+}
+
+/// Extract symbols, dependency edges, and raw references from one file.
+/// Unparseable files and unsupported languages yield empty results rather than
+/// erroring.
+pub fn extract_file(path: &Path, repo_root: &Path) -> (Vec<Symbol>, Vec<DepEdge>, Vec<RawRef>) {
     let Some(language) = Language::from_path(path) else {
-        return (Vec::new(), Vec::new());
+        return (Vec::new(), Vec::new(), Vec::new());
     };
     let Ok(source) = std::fs::read(path) else {
-        return (Vec::new(), Vec::new());
+        return (Vec::new(), Vec::new(), Vec::new());
     };
     let module = lang::module_path(path, repo_root);
     let rel = path
@@ -25,38 +36,52 @@ pub fn extract_file(path: &Path, repo_root: &Path) -> (Vec<Symbol>, Vec<DepEdge>
         .unwrap_or(path)
         .to_string_lossy()
         .to_string();
-    let symbols = extract_symbols(language, &source, &module, &rel);
+    let (symbols, refs) = extract_symbols_and_refs(language, &source, &module, &rel);
     let edges = extract_edges(language, &source, &module);
-    (symbols, edges)
+    (symbols, edges, refs)
 }
 
-fn extract_symbols(language: Language, source: &[u8], module: &str, rel: &str) -> Vec<Symbol> {
+fn extract_symbols_and_refs(
+    language: Language,
+    source: &[u8],
+    module: &str,
+    rel: &str,
+) -> (Vec<Symbol>, Vec<RawRef>) {
     let Ok(config) = language.tags_config() else {
-        return Vec::new();
+        return (Vec::new(), Vec::new());
     };
     let mut ctx = TagsContext::new();
     let Ok((tags, _)) = ctx.generate_tags(&config, source, None) else {
-        return Vec::new();
+        return (Vec::new(), Vec::new());
     };
 
     let text = String::from_utf8_lossy(source);
     let lines: Vec<&str> = text.lines().collect();
 
-    let mut out = Vec::new();
+    let mut symbols = Vec::new();
+    // (full byte range of a definition, its qualified_name) for the innermost-
+    // enclosing lookup below. Definition ranges cover the body (the tag node is
+    // the whole `function_item`/`class` etc.), unlike `Tag.span` (name only).
+    let mut defs: Vec<(Range<usize>, String)> = Vec::new();
+    // (referenced name, byte position) — enclosing symbol resolved after the loop.
+    let mut ref_sites: Vec<(String, usize)> = Vec::new();
+
     for tag in tags {
         let Ok(tag) = tag else { continue };
+        let name = String::from_utf8_lossy(&source[tag.name_range.clone()]).into_owned();
         if !tag.is_definition {
+            ref_sites.push((name, tag.name_range.start));
             continue;
         }
-        let name = String::from_utf8_lossy(&source[tag.name_range.clone()]).into_owned();
+        let qualified_name = format!("{module}::{name}");
         let kind = map_kind(config.syntax_type_name(tag.syntax_type_id));
         let start_row = tag.span.start.row;
         let decl_line = lines.get(start_row).map(|l| l.trim().to_string());
-        let visibility =
-            classify_visibility(language, decl_line.as_deref().unwrap_or(""), &name);
+        let visibility = classify_visibility(language, decl_line.as_deref().unwrap_or(""), &name);
 
-        out.push(Symbol {
-            qualified_name: format!("{module}::{name}"),
+        defs.push((tag.range.clone(), qualified_name.clone()));
+        symbols.push(Symbol {
+            qualified_name,
             name,
             kind,
             visibility,
@@ -73,7 +98,25 @@ fn extract_symbols(language: Language, source: &[u8], module: &str, rel: &str) -
             facts: Facts::default(),
         });
     }
-    out
+
+    let refs = ref_sites
+        .into_iter()
+        .map(|(name, pos)| RawRef {
+            from: enclosing(&defs, pos).unwrap_or(module).to_string(),
+            name,
+        })
+        .collect();
+
+    (symbols, refs)
+}
+
+/// The innermost definition whose byte range contains `pos`. Among containing
+/// ranges the one with the largest `start` is the most deeply nested.
+fn enclosing(defs: &[(Range<usize>, String)], pos: usize) -> Option<&str> {
+    defs.iter()
+        .filter(|(r, _)| r.start <= pos && pos < r.end)
+        .max_by_key(|(r, _)| r.start)
+        .map(|(_, q)| q.as_str())
 }
 
 fn extract_edges(language: Language, source: &[u8], module: &str) -> Vec<DepEdge> {
@@ -177,10 +220,14 @@ mod tests {
         edges.iter().any(|e| e.to_module.contains(target_contains))
     }
 
+    fn has_ref(refs: &[RawRef], from: &str, name: &str) -> bool {
+        refs.iter().any(|r| r.from == from && r.name == name)
+    }
+
     #[test]
     fn rust_symbols_and_edges() {
         let src = b"pub fn foo() {}\nfn bar() {}\nuse std::fmt;\n";
-        let syms = extract_symbols(Language::Rust, src, "m", "m.rs");
+        let (syms, _refs) = extract_symbols_and_refs(Language::Rust, src, "m", "m.rs");
         assert_eq!(vis_of(&syms, "foo"), Some(Visibility::Public));
         assert_eq!(vis_of(&syms, "bar"), Some(Visibility::Private));
         let edges = extract_edges(Language::Rust, src, "m");
@@ -190,7 +237,7 @@ mod tests {
     #[test]
     fn python_symbols_and_edges() {
         let src = b"def foo():\n    pass\ndef _bar():\n    pass\nimport os\n";
-        let syms = extract_symbols(Language::Python, src, "m", "m.py");
+        let (syms, _refs) = extract_symbols_and_refs(Language::Python, src, "m", "m.py");
         assert_eq!(vis_of(&syms, "foo"), Some(Visibility::Public));
         assert_eq!(vis_of(&syms, "_bar"), Some(Visibility::Private));
         let edges = extract_edges(Language::Python, src, "m");
@@ -200,7 +247,7 @@ mod tests {
     #[test]
     fn javascript_symbols_and_edges() {
         let src = b"export function foo() {}\nfunction bar() {}\nimport x from \"./mod\";\n";
-        let syms = extract_symbols(Language::JavaScript, src, "m", "m.js");
+        let (syms, _refs) = extract_symbols_and_refs(Language::JavaScript, src, "m", "m.js");
         assert_eq!(vis_of(&syms, "foo"), Some(Visibility::Public));
         assert_eq!(vis_of(&syms, "bar"), Some(Visibility::Internal));
         let edges = extract_edges(Language::JavaScript, src, "m");
@@ -210,7 +257,7 @@ mod tests {
     #[test]
     fn typescript_symbols_and_edges() {
         let src = b"export class A {}\nimport { x } from \"./mod\";\n";
-        let syms = extract_symbols(Language::TypeScript, src, "m", "m.ts");
+        let (syms, _refs) = extract_symbols_and_refs(Language::TypeScript, src, "m", "m.ts");
         assert_eq!(vis_of(&syms, "A"), Some(Visibility::Public));
         let edges = extract_edges(Language::TypeScript, src, "m");
         assert!(has_edge(&edges, "./mod"));
@@ -219,9 +266,34 @@ mod tests {
     #[test]
     fn java_symbols_and_edges() {
         let src = b"import a.b.C;\npublic class A {\n  public void m() {}\n}\n";
-        let syms = extract_symbols(Language::Java, src, "m", "m.java");
+        let (syms, _refs) = extract_symbols_and_refs(Language::Java, src, "m", "m.java");
         assert_eq!(vis_of(&syms, "A"), Some(Visibility::Public));
         let edges = extract_edges(Language::Java, src, "m");
         assert!(has_edge(&edges, "a.b.C"));
+    }
+
+    #[test]
+    fn call_resolves_to_enclosing_caller() {
+        // `foo`'s body calls `bar` -> a reference from `m::foo` named `bar`.
+        let src = b"fn bar() {}\nfn foo() {\n    bar();\n}\n";
+        let (_syms, refs) = extract_symbols_and_refs(Language::Rust, src, "m", "m.rs");
+        assert!(has_ref(&refs, "m::foo", "bar"));
+    }
+
+    #[test]
+    fn recursive_call_is_kept_as_self_ref_site() {
+        // The self-call is captured with from == name; the self-edge is dropped
+        // later, globally, in `resolve_refs`.
+        let src = b"fn foo() {\n    foo();\n}\n";
+        let (_syms, refs) = extract_symbols_and_refs(Language::Rust, src, "m", "m.rs");
+        assert!(has_ref(&refs, "m::foo", "foo"));
+    }
+
+    #[test]
+    fn top_level_reference_falls_back_to_module() {
+        // A call outside any definition has the module path as its `from`.
+        let src = b"fn foo() {}\nconst N: usize = foo();\n";
+        let (_syms, refs) = extract_symbols_and_refs(Language::Rust, src, "m", "m.rs");
+        assert!(refs.iter().any(|r| r.name == "foo" && r.from == "m"));
     }
 }

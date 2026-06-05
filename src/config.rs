@@ -1,0 +1,284 @@
+//! Layer 1: env vars and CLI flags named in docs that the code never reads.
+//!
+//! Grounding is loose presence in source — the same fewest-false-positives
+//! rule coverage-gaps uses. An env var is "real" if its name appears as a token
+//! anywhere in the source tree (`env::var("NAME")`, `process.env.NAME`, etc.
+//! all carry the literal); a `--flag` is "real" if its snake/concat form
+//! appears as a source identifier. A documented name grounded nowhere is
+//! `stale`.
+//!
+//! Flags are scoped to *this project's* CLI: only `--flags` attached to a
+//! command whose first token is one of the project's own binaries are checked,
+//! so a documented third-party invocation (`npm install --save-dev`) is never
+//! mistaken for our drift. System env vars (`$HOME`, `$PATH`, …) are excluded.
+
+use std::collections::HashSet;
+use std::path::Path;
+use std::sync::OnceLock;
+
+use regex::Regex;
+
+use crate::code::lang;
+use crate::commands::command_lines;
+use crate::findings::{Finding, Verdict};
+
+/// Every identifier-like token across all source files — the grounding set for
+/// env vars and flags. TOML/YAML are in `CODE_EXTS`, so `Cargo.toml` keys (e.g.
+/// `features`, `release`) ground the corresponding cargo flags.
+pub fn code_tokens(repo_root: &Path) -> HashSet<String> {
+    let mut tokens = HashSet::new();
+    for file in lang::code_files(repo_root) {
+        if let Ok(text) = std::fs::read_to_string(&file) {
+            for m in ident_re().find_iter(&text) {
+                tokens.insert(m.as_str().to_string());
+            }
+        }
+    }
+    tokens
+}
+
+/// Check env-var and flag claims in `markdown` against the source grounding set.
+pub fn check(
+    markdown: &str,
+    doc_path: &str,
+    code_tokens: &HashSet<String>,
+    project_bins: &HashSet<String>,
+) -> Vec<Finding> {
+    let mut findings = Vec::new();
+    check_env_vars(markdown, doc_path, code_tokens, &mut findings);
+    check_flags(markdown, doc_path, code_tokens, project_bins, &mut findings);
+    findings
+}
+
+fn check_env_vars(
+    markdown: &str,
+    doc_path: &str,
+    code_tokens: &HashSet<String>,
+    findings: &mut Vec<Finding>,
+) {
+    let mut seen = HashSet::new();
+    for (line, name) in env_var_claims(markdown) {
+        if SYSTEM_ENV.contains(&name.as_str()) || !seen.insert((line, name.clone())) {
+            continue;
+        }
+        if !code_tokens.contains(&name) {
+            findings.push(Finding {
+                verdict: Verdict::Stale,
+                claim: format!("references env var `{name}`"),
+                doc_path: format!("{doc_path}:{line}"),
+                detail: format!(
+                    "Env var `{name}` is named in docs but read nowhere in the code."
+                ),
+                layer: 1,
+                code_refs: Vec::new(),
+            });
+        }
+    }
+}
+
+fn check_flags(
+    markdown: &str,
+    doc_path: &str,
+    code_tokens: &HashSet<String>,
+    project_bins: &HashSet<String>,
+    findings: &mut Vec<Finding>,
+) {
+    if project_bins.is_empty() {
+        return; // No known CLI ⇒ can't attribute any flag to us.
+    }
+    let mut seen = HashSet::new();
+    for (line, cmd) in command_lines(markdown) {
+        let mut toks = cmd.split_whitespace();
+        let Some(bin) = toks.next() else { continue };
+        if !project_bins.contains(bin) {
+            continue;
+        }
+        for tok in toks {
+            let Some(flag) = long_flag_re().captures(tok).map(|c| c[1].to_string()) else {
+                continue;
+            };
+            if AUTO_FLAGS.contains(&flag.as_str()) || !seen.insert((line, flag.clone())) {
+                continue;
+            }
+            if !flag_grounded(&flag, code_tokens) {
+                findings.push(Finding {
+                    verdict: Verdict::Stale,
+                    claim: format!("documents flag `--{flag}`"),
+                    doc_path: format!("{doc_path}:{line}"),
+                    detail: format!(
+                        "Flag `--{flag}` for `{bin}` is documented but absent from the code."
+                    ),
+                    layer: 1,
+                    code_refs: Vec::new(),
+                });
+            }
+        }
+    }
+}
+
+/// A flag is grounded if its snake_case or concatenated form is a source
+/// identifier — covers clap-derive (`--max-layer` → field `max_layer`) without
+/// requiring the literal `--max-layer` to appear anywhere.
+fn flag_grounded(flag: &str, code_tokens: &HashSet<String>) -> bool {
+    let snake = flag.replace('-', "_");
+    let concat = flag.replace('-', "");
+    code_tokens.contains(&snake) || code_tokens.contains(&concat)
+}
+
+/// Env-var names from docs: `$NAME` / `${NAME}` anywhere, plus inline
+/// `backtick` spans whose whole content is an `UPPER_SNAKE` env identifier
+/// (requiring an underscore avoids matching prose acronyms like `API`).
+fn env_var_claims(markdown: &str) -> Vec<(usize, String)> {
+    let mut out = Vec::new();
+    let mut in_fence = false;
+    for (i, line) in markdown.lines().enumerate() {
+        let lineno = i + 1;
+        let trimmed = line.trim_start();
+        if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
+            in_fence = !in_fence;
+            continue;
+        }
+        for cap in dollar_env_re().captures_iter(line) {
+            out.push((lineno, cap[1].to_string()));
+        }
+        if !in_fence {
+            for cap in inline_code_re().captures_iter(line) {
+                let inner = cap[1].trim();
+                if upper_snake_env_re().is_match(inner) {
+                    out.push((lineno, inner.to_string()));
+                }
+            }
+        }
+    }
+    out
+}
+
+/// clap auto-generates these; they never appear as source identifiers.
+const AUTO_FLAGS: &[&str] = &["help", "version"];
+
+/// System/shell env vars docs may mention that the project doesn't itself read.
+const SYSTEM_ENV: &[&str] = &[
+    "HOME",
+    "PATH",
+    "PWD",
+    "OLDPWD",
+    "USER",
+    "LOGNAME",
+    "SHELL",
+    "LANG",
+    "LC_ALL",
+    "LC_CTYPE",
+    "TERM",
+    "TMPDIR",
+    "TMP",
+    "TEMP",
+    "EDITOR",
+    "VISUAL",
+    "PAGER",
+    "HOSTNAME",
+    "DISPLAY",
+    "SHLVL",
+    "HTTP_PROXY",
+    "HTTPS_PROXY",
+    "NO_PROXY",
+    "FTP_PROXY",
+];
+
+fn ident_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| Regex::new(r"[A-Za-z_][A-Za-z0-9_]+").unwrap())
+}
+
+fn inline_code_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| Regex::new(r"`([^`]+)`").unwrap())
+}
+
+/// `$NAME` or `${NAME}` (name starts with a letter/underscore, length ≥ 2).
+fn dollar_env_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| Regex::new(r"\$\{?([A-Za-z_][A-Za-z0-9_]+)\}?").unwrap())
+}
+
+/// `UPPER_SNAKE` with at least one underscore.
+fn upper_snake_env_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| Regex::new(r"^[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+$").unwrap())
+}
+
+/// A long flag token `--kebab-name` (≥ 2 chars after the dashes).
+fn long_flag_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| Regex::new(r"^--([a-z][a-z0-9-]+)$").unwrap())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn tokens(words: &[&str]) -> HashSet<String> {
+        words.iter().map(|w| w.to_string()).collect()
+    }
+
+    fn bins(words: &[&str]) -> HashSet<String> {
+        words.iter().map(|w| w.to_string()).collect()
+    }
+
+    #[test]
+    fn ungrounded_env_var_is_flagged() {
+        let code = tokens(&["DATABASE_URL", "main"]);
+        let md = "Set `DATABASE_URL` and `REDIS_URL` before running.";
+        let flagged: Vec<String> = check(md, "README.md", &code, &HashSet::new())
+            .iter()
+            .map(|f| f.detail.clone())
+            .collect();
+        assert!(flagged.iter().any(|d| d.contains("REDIS_URL")));
+        assert!(!flagged.iter().any(|d| d.contains("DATABASE_URL")));
+    }
+
+    #[test]
+    fn dollar_form_and_system_vars() {
+        let code = tokens(&["PORT"]);
+        // $HOME is a system var (skipped); $LISTEN_ADDR is ours and ungrounded.
+        let md = "Reads `$HOME`, `$PORT`, and `${LISTEN_ADDR}`.";
+        let flagged: Vec<String> = check(md, "README.md", &code, &HashSet::new())
+            .iter()
+            .map(|f| f.detail.clone())
+            .collect();
+        assert!(flagged.iter().any(|d| d.contains("LISTEN_ADDR")));
+        assert!(!flagged.iter().any(|d| d.contains("HOME")));
+        assert!(!flagged.iter().any(|d| d.contains("PORT")));
+    }
+
+    #[test]
+    fn flag_grounded_via_snake_form() {
+        let code = tokens(&["max_layer", "format"]);
+        // clap derive: --max-layer ↔ field max_layer; --format ↔ field format.
+        let md = "`app --max-layer 2 --format json`";
+        assert!(check(md, "README.md", &code, &bins(&["app"])).is_empty());
+    }
+
+    #[test]
+    fn ungrounded_project_flag_is_flagged() {
+        let code = tokens(&["format"]);
+        let md = "`app check --diff main`";
+        let flagged = check(md, "README.md", &code, &bins(&["app"]));
+        assert_eq!(flagged.len(), 1);
+        assert!(flagged[0].detail.contains("--diff"));
+    }
+
+    #[test]
+    fn third_party_flags_are_not_checked() {
+        let code = HashSet::new();
+        // npm is not a project bin → its --save-dev flag is none of our business.
+        let md = "`npm install --save-dev typescript`";
+        assert!(check(md, "README.md", &code, &bins(&["app"])).is_empty());
+    }
+
+    #[test]
+    fn no_project_bins_means_no_flag_findings() {
+        let code = HashSet::new();
+        let md = "`app --whatever`";
+        assert!(check(md, "README.md", &code, &HashSet::new()).is_empty());
+    }
+}

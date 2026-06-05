@@ -75,3 +75,13 @@ pub struct DepEdge {
     pub from_module: String,
     pub to_module: String,
 }
+
+/// A symbol-level reference: the enclosing definition `from_symbol` references
+/// the definition `to_symbol` (a call, impl, or type use). Both endpoints are
+/// `qualified_name`s. Targets are resolved by name (over-approximate on
+/// collisions), so this never under-counts a symbol's callers.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct RefEdge {
+    pub from_symbol: String,
+    pub to_symbol: String,
+}

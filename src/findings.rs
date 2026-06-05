@@ -11,6 +11,8 @@ pub enum Verdict {
     Stale,
     /// could not gather evidence either way
     Unverifiable,
+    /// public code surface that no doc references (code -> doc gap)
+    Undocumented,
     /// claim backed by code (not reported by default)
     Supported,
 }
@@ -21,6 +23,7 @@ impl Verdict {
             Verdict::Contradicted => "contradicted",
             Verdict::Stale => "stale",
             Verdict::Unverifiable => "unverifiable",
+            Verdict::Undocumented => "undocumented",
             Verdict::Supported => "supported",
         }
     }

@@ -43,12 +43,19 @@ docs (.md, CLAUDE.md)                         codebase
 The cheapest, highest-signal layer. Many doc claims are concrete and verifiable
 without any model:
 - file/dir paths quoted in docs that don't exist
-- commands (`npm test`, `make build`) with no matching script/target
-- referenced env vars, config keys, flags
-- stated entry points / module paths
+- commands (`npm run`, `make`, `cargo` with `--bin`) with no matching script,
+  target, or binary in the package.json / Makefile / Cargo.toml manifest
+- env vars and CLI flags referenced in docs but never read in the code
+- qualified code references (module::symbol, Type::method) that resolve to no
+  symbol or module in the tree-sitter index
+- architecture rules stated in docs or a .shlomes/rules.toml file (forbidden
+  imports, layering, forbidden symbols) that the dependency graph violates →
+  `contradicted`
 
-Runs in milliseconds, no API cost, no false positives. Catches a large share of
-real drift on its own.
+Runs in milliseconds, no API cost, no false positives. Each check only fires
+against grounding that actually exists (no manifest ⇒ no command findings; an
+external `std::…` path is never our claim), so it under-reports rather than ever
+flagging a false positive. Catches a large share of real drift on its own.
 
 ### Layer 2 — Retrieval (this is where embeddings belong)
 For claims that aren't deterministically checkable ("the cache invalidates on
@@ -81,8 +88,11 @@ shlomes check --diff main     # only what changed vs main
 shlomes check --format json   # machine-readable findings
 shlomes check --layer 1       # deterministic only (no model needed)
 
-shlomes index                 # extract code symbols + dependency edges (tree-sitter)
+shlomes index                 # code symbols + module edges + symbol reference edges (tree-sitter)
 shlomes index --format json   # machine-readable index
+
+shlomes coverage              # public code surface that no doc describes (code -> doc gaps)
+shlomes coverage --format json
 
 # Layer 2 — local semantic code search (requires the `ml` feature build)
 shlomes retrieve "where is auth handled" --k 5

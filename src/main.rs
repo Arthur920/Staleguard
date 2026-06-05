@@ -1,10 +1,15 @@
 //! shlomes command-line entry point.
 
 mod code;
+mod commands;
+mod config;
+mod coverage;
+mod entrypoints;
 mod extract;
 mod findings;
 #[cfg(feature = "ml")]
 mod retrieve;
+mod rules;
 mod verify;
 
 use code::CodeIndex;
@@ -51,6 +56,15 @@ enum Commands {
         #[arg(long, value_enum, default_value_t = Format::Text)]
         format: Format,
     },
+    /// Report public code surface that no doc describes (code -> doc gaps).
+    Coverage {
+        /// Repo root (default: cwd).
+        #[arg(default_value = ".")]
+        path: PathBuf,
+        /// Output format.
+        #[arg(long, value_enum, default_value_t = Format::Text)]
+        format: Format,
+    },
     /// Semantic code search using local jina embeddings (requires `ml` feature).
     #[cfg(feature = "ml")]
     Retrieve {
@@ -71,7 +85,7 @@ enum Format {
     Json,
 }
 
-fn collect_docs(root: &Path) -> Vec<PathBuf> {
+pub(crate) fn collect_docs(root: &Path) -> Vec<PathBuf> {
     WalkDir::new(root)
         .into_iter()
         .filter_entry(|e| {
@@ -91,6 +105,16 @@ fn collect_docs(root: &Path) -> Vec<PathBuf> {
 }
 
 fn run_check(root: &Path) -> Vec<Finding> {
+    // Repo-wide grounding, built once and shared across every doc.
+    let index = CodeIndex::build(root);
+    let manifests = commands::Manifests::load(root);
+    let code_tokens = config::code_tokens(root);
+    let grounding = entrypoints::Grounding::from_index(&index);
+
+    // Architecture rules: file-sourced now, prose-sourced accumulated per doc,
+    // then verified once (the symbol scan walks the whole repo).
+    let mut arch_rules = rules::load_file_rules(root);
+
     let mut findings = Vec::new();
     for doc in collect_docs(root) {
         let text = match std::fs::read_to_string(&doc) {
@@ -104,7 +128,17 @@ fn run_check(root: &Path) -> Vec<Finding> {
             .to_string();
         let claims = extract::extract_path_claims(&text, &rel);
         findings.extend(verify::check_paths(&claims, root));
+        findings.extend(commands::check(&text, &rel, &manifests));
+        findings.extend(config::check(
+            &text,
+            &rel,
+            &code_tokens,
+            manifests.project_bins(),
+        ));
+        findings.extend(entrypoints::check(&text, &rel, &grounding));
+        arch_rules.extend(rules::extract_prose_rules(&text, &rel));
     }
+    findings.extend(rules::check(&arch_rules, &index, root));
     findings
 }
 
@@ -141,10 +175,18 @@ fn report_index(index: &CodeIndex, format: Format) {
             for e in &index.edges {
                 println!("edge  {} -> {}", e.from_module, e.to_module);
             }
+            for e in &index.module_edges {
+                println!("mod-edge  {} -> {}", e.from_module, e.to_module);
+            }
+            for r in &index.ref_edges {
+                println!("ref-edge  {} -> {}", r.from_symbol, r.to_symbol);
+            }
             println!(
-                "\n{} symbol(s), {} edge(s)",
+                "\n{} symbol(s), {} edge(s), {} mod-edge(s), {} ref-edge(s)",
                 index.symbols.len(),
-                index.edges.len()
+                index.edges.len(),
+                index.module_edges.len(),
+                index.ref_edges.len()
             );
         }
     }
@@ -175,6 +217,16 @@ fn main() -> ExitCode {
             let index = CodeIndex::build(&root);
             report_index(&index, format);
             ExitCode::SUCCESS
+        }
+        Commands::Coverage { path, format } => {
+            let root = std::fs::canonicalize(&path).unwrap_or(path);
+            let findings = coverage::run(&root);
+            report(&findings, format);
+            if findings.is_empty() {
+                ExitCode::SUCCESS
+            } else {
+                ExitCode::FAILURE
+            }
         }
         #[cfg(feature = "ml")]
         Commands::Retrieve { query, path, k } => {
