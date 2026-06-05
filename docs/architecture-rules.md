@@ -32,12 +32,13 @@ invariants verified against the dependency graph. So:
 This is deterministic contradiction detection for the architectural-claim slice,
 and it's exactly the forbidden-pattern check flagged as the one real gap.
 
-### Rule sources
-- **Explicit** — a rules file (sentrux uses `.sentrux/rules.toml`; ArchUnit uses
-  test code). Hand-authored, precise.
-- **Extracted from prose** — the novel bit. Parse architectural assertions out of
-  docs and synthesize the rule. Lower precision, so: high-confidence patterns run
-  as deterministic rules; ambiguous ones fall through to the Layer-3 judge.
+### Rule source: extracted from prose
+shlomes derives rules from the docs themselves — parse architectural assertions
+out of prose and synthesize the rule. That's the whole point: the docs are
+already the source of truth, so a separate hand-authored rules file (sentrux's
+`.sentrux/rules.toml`, ArchUnit's test code) would just be a second place to keep
+in sync. We deliberately don't add one. High-confidence phrasings run as
+deterministic rules; ambiguous ones fall through to the Layer-3 judge.
 
 ## Reuse, don't rebuild: the dependency graph (DSM)
 

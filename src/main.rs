@@ -111,9 +111,9 @@ fn run_check(root: &Path) -> Vec<Finding> {
     let code_tokens = config::code_tokens(root);
     let grounding = entrypoints::Grounding::from_index(&index);
 
-    // Architecture rules: file-sourced now, prose-sourced accumulated per doc,
-    // then verified once (the symbol scan walks the whole repo).
-    let mut arch_rules = rules::load_file_rules(root);
+    // Architecture rules: prose-sourced, accumulated per doc, then verified once
+    // (the symbol scan walks the whole repo).
+    let mut arch_rules: Vec<rules::SourcedRule> = Vec::new();
 
     let mut findings = Vec::new();
     for doc in collect_docs(root) {

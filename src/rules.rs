@@ -3,9 +3,9 @@
 //! Docs constantly state architectural invariants — "`controllers` must not
 //! import `db`", "`domain` depends on nothing", "no direct use of `eval`".
 //! These are negative/absence claims the other checks can't see. Here we
-//! extract such rules (from doc prose and an explicit `.shlomes/rules.toml`),
-//! compile each to a dependency-graph or source query, and verify it against the
-//! resolved module graph. A violation is a hard `contradicted` verdict — no ML.
+//! extract such rules from doc prose, compile each to a dependency-graph or
+//! source query, and verify it against the resolved module graph. A violation
+//! is a hard `contradicted` verdict — no ML.
 //!
 //! Zero false positives: a rule whose module operands don't resolve to any real
 //! module is skipped rather than guessed, and module matching is grounded
@@ -16,7 +16,6 @@ use std::path::Path;
 use std::sync::OnceLock;
 
 use regex::Regex;
-use serde::Deserialize;
 
 use crate::code::lang;
 use crate::code::CodeIndex;
@@ -77,75 +76,6 @@ pub fn extract_prose_rules(markdown: &str, doc_path: &str) -> Vec<SourcedRule> {
             });
         }
     }
-    rules
-}
-
-#[derive(Deserialize, Default)]
-struct RulesFile {
-    #[serde(default)]
-    forbid: Vec<ForbidEdgeToml>,
-    #[serde(default)]
-    layer: Vec<LayerToml>,
-    #[serde(default)]
-    forbid_symbol: Vec<ForbidSymbolToml>,
-}
-
-#[derive(Deserialize)]
-struct ForbidEdgeToml {
-    from: String,
-    to: String,
-}
-
-#[derive(Deserialize)]
-struct LayerToml {
-    module: String,
-    #[serde(default)]
-    allowed: Vec<String>,
-}
-
-#[derive(Deserialize)]
-struct ForbidSymbolToml {
-    symbol: String,
-    #[serde(default)]
-    except: Vec<String>,
-}
-
-/// Load rules from `.shlomes/rules.toml`, if present. A malformed file warns and
-/// contributes no rules rather than failing the run.
-pub fn load_file_rules(repo_root: &Path) -> Vec<SourcedRule> {
-    let path = repo_root.join(".shlomes/rules.toml");
-    let Ok(text) = std::fs::read_to_string(&path) else {
-        return Vec::new();
-    };
-    let parsed: RulesFile = match toml::from_str(&text) {
-        Ok(p) => p,
-        Err(e) => {
-            eprintln!("warning: ignoring .shlomes/rules.toml: {e}");
-            return Vec::new();
-        }
-    };
-    let origin = ".shlomes/rules.toml".to_string();
-    let wrap = |rule| SourcedRule { rule, origin: origin.clone() };
-
-    let mut rules = Vec::new();
-    rules.extend(
-        parsed
-            .forbid
-            .into_iter()
-            .map(|f| wrap(Rule::ForbidEdge { from: f.from, to: f.to })),
-    );
-    rules.extend(
-        parsed
-            .layer
-            .into_iter()
-            .map(|l| wrap(Rule::Layer { module: l.module, allowed: l.allowed })),
-    );
-    rules.extend(
-        parsed
-            .forbid_symbol
-            .into_iter()
-            .map(|s| wrap(Rule::ForbidSymbol { symbol: s.symbol, except: s.except })),
-    );
     rules
 }
 

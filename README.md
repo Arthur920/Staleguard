@@ -48,9 +48,8 @@ without any model:
 - env vars and CLI flags referenced in docs but never read in the code
 - qualified code references (module::symbol, Type::method) that resolve to no
   symbol or module in the tree-sitter index
-- architecture rules stated in docs or a .shlomes/rules.toml file (forbidden
-  imports, layering, forbidden symbols) that the dependency graph violates →
-  `contradicted`
+- architecture rules stated in doc prose (forbidden imports, layering,
+  forbidden symbols) that the dependency graph violates → `contradicted`
 
 Runs in milliseconds, no API cost, no false positives. Each check only fires
 against grounding that actually exists (no manifest ⇒ no command findings; an
