@@ -12,9 +12,10 @@ path = "src/main.rs"
 
 [features]
 default = []
-# Layer 2 local retrieval: jina code embeddings via fastembed (ONNX, fully
-# offline after the first model download). Layer 3 (LLM judge) will extend this.
-ml = ["dep:fastembed", "dep:anyhow", "dep:hf-hub"]
+# Layer 2 local retrieval (jina code embeddings via fastembed) + Layer 3
+# verification (NLI cross-encoder via ort/tokenizers). Both ONNX, fully offline
+# after the first model download.
+ml = ["dep:fastembed", "dep:anyhow", "dep:hf-hub", "dep:ort", "dep:tokenizers"]
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }
@@ -30,6 +31,10 @@ anyhow = { version = "1", optional = true }
 # offers fp32). Feature flags mirror fastembed's own hf-hub usage so cargo
 # unifies to a single crate instance / TLS stack.
 hf-hub = { version = "0.5", default-features = false, features = ["ureq", "native-tls"], optional = true }
+# Layer 3 NLI judge: raw ONNX inference (ort) + the model's tokenizer. Pinned to
+# the same versions fastembed resolves so cargo unifies to one ort/onnxruntime.
+ort = { version = "2.0.0-rc.12", optional = true }
+tokenizers = { version = "0.22", optional = true }
 tree-sitter = "0.26"
 tree-sitter-tags = "0.26"
 tree-sitter-rust = "0.24.2"

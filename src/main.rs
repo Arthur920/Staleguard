@@ -12,6 +12,8 @@ mod extract;
 mod findings;
 mod git;
 #[cfg(feature = "ml")]
+mod judge;
+#[cfg(feature = "ml")]
 mod retrieve;
 mod rules;
 mod verify;
@@ -47,7 +49,8 @@ enum Commands {
         /// Output format.
         #[arg(long, value_enum, default_value_t = Format::Text)]
         format: Format,
-        /// Max layer: 1 deterministic, 2 +retrieval, 3 +LLM (1 only for now).
+        /// Max layer: 1 deterministic, 2 +retrieval, 3 +NLI judge (2-3 require
+        /// the `ml` feature build).
         #[arg(long, default_value_t = 1)]
         layer: u8,
         /// Drift base: only re-derive claims whose code changed since this git
@@ -119,7 +122,8 @@ pub(crate) fn collect_docs(root: &Path) -> Vec<PathBuf> {
         .collect()
 }
 
-fn run_check(root: &Path, opts: &drift::Options) -> drift::Outcome {
+fn run_check(root: &Path, opts: &drift::Options, layer: u8) -> drift::Outcome {
+    let _ = layer; // consulted only in `ml` builds for the Layer 3 judge.
     // Repo-wide grounding, built once and shared across every doc.
     let index = CodeIndex::build(root);
     let manifests = commands::Manifests::load(root);
@@ -171,6 +175,30 @@ fn run_check(root: &Path, opts: &drift::Options) -> drift::Outcome {
     // Code -> doc coverage gaps: undocumented public surface, anchored to its
     // symbol so it scores as its own dimension of the alignment score.
     findings.extend(coverage::gaps(&index, root));
+
+    // Layer 3: behavioural prose claims the deterministic layers can't reach.
+    // Layer 2 retrieves the evidence; the NLI judge renders the verdict. Gated
+    // behind the `ml` feature and `--layer 3`; a model/load failure degrades to
+    // the deterministic findings rather than aborting the run.
+    #[cfg(feature = "ml")]
+    if layer >= 3 {
+        let mut claims = Vec::new();
+        for doc in collect_docs(root) {
+            if let Ok(text) = std::fs::read_to_string(&doc) {
+                let rel = doc
+                    .strip_prefix(root)
+                    .unwrap_or(&doc)
+                    .to_string_lossy()
+                    .to_string();
+                claims.extend(judge::candidate_claims(&text, &rel));
+            }
+        }
+        claims.truncate(judge::MAX_CLAIMS);
+        match judge::check(root, &claims, judge::EVIDENCE_K) {
+            Ok(mut judged) => findings.append(&mut judged),
+            Err(e) => eprintln!("note: layer 3 judge skipped ({e})"),
+        }
+    }
 
     // Layer 0: git-history staleness prior, then the drift pipeline (lineage,
     // carry-forward, fact-hash drift flag, alignment score).
@@ -269,15 +297,20 @@ fn main() -> ExitCode {
             fail_on_regression,
         } => {
             let root = std::fs::canonicalize(&path).unwrap_or(path);
+            #[cfg(not(feature = "ml"))]
             if layer > 1 {
-                eprintln!("note: layers 2-3 are not implemented yet; running layer 1.");
+                eprintln!("note: layers 2-3 need the `ml` feature; running layer 1 only.");
+            }
+            #[cfg(feature = "ml")]
+            if layer == 2 {
+                eprintln!("note: layer 2 is retrieval-only (no verdicts); use --layer 3 for the NLI judge.");
             }
             let opts = drift::Options {
                 diff_ref: diff,
                 write_ledger,
                 fail_on_regression,
             };
-            let out = run_check(&root, &opts);
+            let out = run_check(&root, &opts, layer);
             report_check(&out, format);
             // Fail on any reportable finding, or on a score regression in CI.
             if out.findings.is_empty() && out.regression.is_none() {

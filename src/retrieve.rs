@@ -34,8 +34,7 @@ pub struct Hit {
     pub path: String,
     pub start_line: usize,
     pub score: f32,
-    /// Chunk body — evidence passed to the Layer 3 judge (not printed yet).
-    #[allow(dead_code)]
+    /// Chunk body — the evidence the Layer 3 judge ([`crate::judge`]) reads.
     pub text: String,
 }
 

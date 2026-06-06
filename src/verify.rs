@@ -1,7 +1,11 @@
 //! Verification layers.
 //!
-//! Layer 1 (deterministic) is implemented. Layers 2 (retrieval) and 3 (LLM
-//! judge) are declared here as the integration points.
+//! Layer 1 (deterministic) lives here. Layer 2 (retrieval) is in [`retrieve`]
+//! and Layer 3 (the NLI judge) in [`judge`]; both are gated behind the `ml`
+//! feature.
+//!
+//! [`retrieve`]: crate::retrieve
+//! [`judge`]: crate::judge
 
 use std::path::Path;
 
@@ -53,15 +57,6 @@ fn tree_contains(root: &Path, suffix: &str) -> bool {
         .filter_entry(|e| e.file_name() != ".git")
         .filter_map(|e| e.ok())
         .any(|e| e.path().to_string_lossy().ends_with(suffix))
-}
-
-/// Layer 3: LLM-as-judge over (claim, evidence) -> Verdict.
-///
-/// Not yet implemented. Will live behind a `ml` cargo feature (HTTP to the
-/// Anthropic API).
-#[allow(dead_code)]
-pub fn judge_claim(_claim: &str, _evidence: &[String]) -> Verdict {
-    unimplemented!("Layer 3 (LLM verification) is not implemented yet.")
 }
 
 #[cfg(test)]
