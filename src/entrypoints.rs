@@ -16,6 +16,7 @@ use std::sync::OnceLock;
 
 use regex::Regex;
 
+use crate::claim::Provenance;
 use crate::code::CodeIndex;
 use crate::findings::{Finding, Verdict};
 
@@ -64,19 +65,29 @@ pub fn check(markdown: &str, doc_path: &str, g: &Grounding) -> Vec<Finding> {
         let Some(member) = effective.last() else {
             continue;
         };
-        if g.names.contains(*member) || !seen.insert((line, reference.clone())) {
+        if !seen.insert((line, reference.clone())) {
             continue;
         }
-        findings.push(Finding {
-            verdict: Verdict::Stale,
-            claim: format!("references `{reference}`"),
-            doc_path: format!("{doc_path}:{line}"),
-            detail: format!(
-                "`{reference}` is named in docs but `{member}` resolves to no symbol or module in the code."
-            ),
-            layer: 1,
-            code_refs: Vec::new(),
-        });
+        let doc_ref = format!("{doc_path}:{line}");
+        let claim = format!("references `{reference}`");
+        if g.names.contains(*member) {
+            // Anchor to the member name; the drift changed-set includes symbol
+            // short names, so this carries forward until that symbol changes.
+            findings.push(Finding::supported(
+                claim,
+                doc_ref,
+                Provenance::symbol((*member).to_string()),
+            ));
+        } else {
+            findings.push(Finding::problem(
+                Verdict::Stale,
+                claim,
+                doc_ref,
+                format!(
+                    "`{reference}` is named in docs but `{member}` resolves to no symbol or module in the code."
+                ),
+            ));
+        }
     }
     findings
 }
@@ -150,6 +161,7 @@ mod tests {
                 start_line: 1,
                 end_line: 1,
             },
+            body_span: Span::zero(),
             signature: None,
             doc: None,
             facts: Facts::default(),
@@ -173,7 +185,8 @@ mod tests {
     #[test]
     fn local_resolvable_ref_is_not_flagged() {
         let g = grounding();
-        assert!(check("See `verify::check_paths`.", "README.md", &g).is_empty());
+        let f = check("See `verify::check_paths`.", "README.md", &g);
+        assert!(f.iter().all(|x| !x.verdict.is_reportable()), "{f:?}");
     }
 
     #[test]
@@ -205,6 +218,7 @@ mod tests {
     fn type_qualified_method_resolves() {
         let g = grounding();
         // Head is a known symbol name (CodeIndex), member build exists.
-        assert!(check("`CodeIndex::build` indexes the repo.", "README.md", &g).is_empty());
+        let f = check("`CodeIndex::build` indexes the repo.", "README.md", &g);
+        assert!(f.iter().all(|x| !x.verdict.is_reportable()), "{f:?}");
     }
 }

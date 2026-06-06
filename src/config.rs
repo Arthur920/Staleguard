@@ -18,6 +18,7 @@ use std::sync::OnceLock;
 
 use regex::Regex;
 
+use crate::claim::Provenance;
 use crate::code::lang;
 use crate::commands::command_lines;
 use crate::findings::{Finding, Verdict};
@@ -61,17 +62,19 @@ fn check_env_vars(
         if SYSTEM_ENV.contains(&name.as_str()) || !seen.insert((line, name.clone())) {
             continue;
         }
-        if !code_tokens.contains(&name) {
-            findings.push(Finding {
-                verdict: Verdict::Stale,
-                claim: format!("references env var `{name}`"),
-                doc_path: format!("{doc_path}:{line}"),
-                detail: format!(
-                    "Env var `{name}` is named in docs but read nowhere in the code."
-                ),
-                layer: 1,
-                code_refs: Vec::new(),
-            });
+        let doc_ref = format!("{doc_path}:{line}");
+        let claim = format!("references env var `{name}`");
+        if code_tokens.contains(&name) {
+            // Token-grounded (no single owning symbol) → empty provenance, so it
+            // is always re-checked rather than carried forward. Safe by default.
+            findings.push(Finding::supported(claim, doc_ref, Provenance::default()));
+        } else {
+            findings.push(Finding::problem(
+                Verdict::Stale,
+                claim,
+                doc_ref,
+                format!("Env var `{name}` is named in docs but read nowhere in the code."),
+            ));
         }
     }
 }
@@ -100,17 +103,17 @@ fn check_flags(
             if AUTO_FLAGS.contains(&flag.as_str()) || !seen.insert((line, flag.clone())) {
                 continue;
             }
-            if !flag_grounded(&flag, code_tokens) {
-                findings.push(Finding {
-                    verdict: Verdict::Stale,
-                    claim: format!("documents flag `--{flag}`"),
-                    doc_path: format!("{doc_path}:{line}"),
-                    detail: format!(
-                        "Flag `--{flag}` for `{bin}` is documented but absent from the code."
-                    ),
-                    layer: 1,
-                    code_refs: Vec::new(),
-                });
+            let doc_ref = format!("{doc_path}:{line}");
+            let claim = format!("documents flag `--{flag}`");
+            if flag_grounded(&flag, code_tokens) {
+                findings.push(Finding::supported(claim, doc_ref, Provenance::default()));
+            } else {
+                findings.push(Finding::problem(
+                    Verdict::Stale,
+                    claim,
+                    doc_ref,
+                    format!("Flag `--{flag}` for `{bin}` is documented but absent from the code."),
+                ));
             }
         }
     }
@@ -255,7 +258,8 @@ mod tests {
         let code = tokens(&["max_layer", "format"]);
         // clap derive: --max-layer ↔ field max_layer; --format ↔ field format.
         let md = "`app --max-layer 2 --format json`";
-        assert!(check(md, "README.md", &code, &bins(&["app"])).is_empty());
+        let findings = check(md, "README.md", &code, &bins(&["app"]));
+        assert!(findings.iter().all(|f| !f.verdict.is_reportable()));
     }
 
     #[test]

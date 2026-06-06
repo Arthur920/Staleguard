@@ -14,6 +14,7 @@ use std::sync::OnceLock;
 
 use regex::Regex;
 
+use crate::claim::Provenance;
 use crate::findings::{Finding, Verdict};
 
 /// The valid invocation targets the repo declares, per tool. `None` means "no
@@ -223,7 +224,10 @@ enum Target<'a> {
     CargoBin(&'a str),
 }
 
-/// Check every command claim in `markdown` against the manifests.
+/// Check every command claim in `markdown` against the manifests. A command
+/// that resolves to a declared target yields a `Supported` claim anchored to
+/// the manifest that declares it; one that names a missing target yields a
+/// `Stale` claim. Commands with no manifest to check against are skipped.
 pub fn check(markdown: &str, doc_path: &str, m: &Manifests) -> Vec<Finding> {
     let mut findings = Vec::new();
     for (line, cmd) in command_lines(markdown) {
@@ -231,23 +235,29 @@ pub fn check(markdown: &str, doc_path: &str, m: &Manifests) -> Vec<Finding> {
         let Some(target) = classify(&toks) else {
             continue;
         };
-        let (kind, name, registry) = match target {
-            Target::NpmScript(n) => ("script", n, m.npm_scripts.as_ref()),
-            Target::MakeTarget(n) => ("make target", n, m.make_targets.as_ref()),
-            Target::CargoBin(n) => ("cargo binary", n, m.cargo_bins.as_ref()),
+        let (kind, name, registry, manifest) = match target {
+            Target::NpmScript(n) => ("script", n, m.npm_scripts.as_ref(), "package.json"),
+            Target::MakeTarget(n) => ("make target", n, m.make_targets.as_ref(), "Makefile"),
+            Target::CargoBin(n) => ("cargo binary", n, m.cargo_bins.as_ref(), "Cargo.toml"),
         };
-        // Only flag when the registry exists and lacks the name.
-        if registry.is_some_and(|r| !r.contains(name)) {
-            findings.push(Finding {
-                verdict: Verdict::Stale,
-                claim: format!("runs `{cmd}`"),
-                doc_path: format!("{doc_path}:{line}"),
-                detail: format!(
-                    "Command `{cmd}` names {kind} `{name}`, which the repo does not define."
-                ),
-                layer: 1,
-                code_refs: Vec::new(),
-            });
+        // Only act when the registry exists (else we can't know the targets).
+        let Some(registry) = registry else { continue };
+        let doc_ref = format!("{doc_path}:{line}");
+        let prov = Provenance::path(manifest);
+        if registry.contains(name) {
+            findings.push(Finding::supported(format!("runs `{cmd}`"), doc_ref, prov));
+        } else {
+            findings.push(
+                Finding::problem(
+                    Verdict::Stale,
+                    format!("runs `{cmd}`"),
+                    doc_ref,
+                    format!(
+                        "Command `{cmd}` names {kind} `{name}`, which the repo does not define."
+                    ),
+                )
+                .anchored(prov),
+            );
         }
     }
     findings
@@ -372,6 +382,7 @@ mod tests {
         let md = "Run `npm run build` then `npm run deploy`.";
         let flagged: Vec<String> = check(md, "README.md", &m)
             .iter()
+            .filter(|f| f.verdict.is_reportable())
             .map(|f| f.detail.clone())
             .collect();
         assert!(flagged.iter().any(|d| d.contains("deploy")));
@@ -393,6 +404,7 @@ mod tests {
         let md = "```sh\nmake build\nmake test\nmake nope\n```";
         let flagged: Vec<String> = check(md, "README.md", &m)
             .iter()
+            .filter(|f| f.verdict.is_reportable())
             .map(|f| f.detail.clone())
             .collect();
         assert_eq!(flagged.len(), 1);
@@ -413,6 +425,7 @@ mod tests {
         let md = "`cargo run --bin shlomes` works; `cargo run --bin ghost` does not.";
         let flagged: Vec<String> = check(md, "README.md", &m)
             .iter()
+            .filter(|f| f.verdict.is_reportable())
             .map(|f| f.detail.clone())
             .collect();
         assert_eq!(flagged.len(), 1);
@@ -441,6 +454,7 @@ mod tests {
         // `yarn add` is a builtin (skip); `yarn lint` is an undefined script.
         let flagged: Vec<String> = check("`yarn add foo` `yarn build` `yarn lint`", "README.md", &m)
             .iter()
+            .filter(|f| f.verdict.is_reportable())
             .map(|f| f.detail.clone())
             .collect();
         assert_eq!(flagged.len(), 1);

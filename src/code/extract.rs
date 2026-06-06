@@ -9,7 +9,8 @@ use tree_sitter::{Parser, Query, QueryCursor};
 use tree_sitter_tags::TagsContext;
 
 use crate::code::lang::{self, Language};
-use crate::code::symbol::{DepEdge, Facts, Span, Symbol, SymbolKind, Visibility};
+use crate::code::symbol::{DepEdge, Span, Symbol, SymbolKind, Visibility};
+use crate::code::facts;
 
 /// A reference whose enclosing definition has been resolved intra-file. `from`
 /// is the enclosing symbol's `qualified_name` (or the module path for top-level
@@ -58,6 +59,17 @@ fn extract_symbols_and_refs(
     let text = String::from_utf8_lossy(source);
     let lines: Vec<&str> = text.lines().collect();
 
+    // Parse the file once so each definition can be walked for behavioral facts
+    // and its full body range located. Tags give byte ranges (`tag.range`) but
+    // not AST nodes; we resolve the node by byte range below.
+    let ts_lang = language.ts_language();
+    let mut parser = Parser::new();
+    let tree = parser
+        .set_language(&ts_lang)
+        .ok()
+        .and_then(|_| parser.parse(source, None));
+    let root = tree.as_ref().map(|t| t.root_node());
+
     let mut symbols = Vec::new();
     // (full byte range of a definition, its qualified_name) for the innermost-
     // enclosing lookup below. Definition ranges cover the body (the tag node is
@@ -80,22 +92,39 @@ fn extract_symbols_and_refs(
         let visibility = classify_visibility(language, decl_line.as_deref().unwrap_or(""), &name);
 
         defs.push((tag.range.clone(), qualified_name.clone()));
+
+        let span = Span {
+            path: rel.to_string(),
+            start_line: start_row + 1,
+            end_line: tag.span.end.row + 1,
+        };
+        // Resolve the definition node (covers the body) for facts + body_span.
+        let def_node = root.and_then(|r| {
+            r.descendant_for_byte_range(tag.range.start, tag.range.end.saturating_sub(1))
+        });
+        let (body_span, fact_data) = match def_node {
+            Some(node) => (
+                Span {
+                    path: rel.to_string(),
+                    start_line: node.start_position().row + 1,
+                    end_line: node.end_position().row + 1,
+                },
+                facts::extract(node, source, language, decl_line.clone()),
+            ),
+            None => (span.clone(), facts::extract_signature_only(decl_line.clone())),
+        };
+
         symbols.push(Symbol {
             qualified_name,
             name,
             kind,
             visibility,
             module: module.to_string(),
-            span: Span {
-                path: rel.to_string(),
-                start_line: start_row + 1,
-                end_line: tag.span.end.row + 1,
-            },
+            span,
+            body_span,
             signature: decl_line,
             doc: tag.docs.clone(),
-            // Behavioral-fact population is deferred to the drift-fingerprint
-            // consumer, which needs a per-symbol AST walk. Plumbing is in place.
-            facts: Facts::default(),
+            facts: fact_data,
         });
     }
 

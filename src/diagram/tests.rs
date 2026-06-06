@@ -1,0 +1,173 @@
+use super::*;
+use crate::code::symbol::DepEdge;
+use crate::findings::Verdict;
+
+fn dep(from: &str, to: &str) -> DepEdge {
+    DepEdge {
+        from_module: from.to_string(),
+        to_module: to.to_string(),
+    }
+}
+
+/// Build a synthetic index: `real` are the actual module edges; every name in
+/// `modules` is forced into `module_set()` so it grounds (mirrors the helper in
+/// `rules::tests`).
+fn idx(real: &[(&str, &str)], modules: &[&str]) -> CodeIndex {
+    CodeIndex {
+        symbols: vec![],
+        edges: modules.iter().map(|m| dep(m, "_")).collect(),
+        module_edges: real.iter().map(|(a, b)| dep(a, b)).collect(),
+        ref_edges: vec![],
+    }
+}
+
+fn mermaid(body: &str) -> String {
+    format!("```mermaid\n{body}\n```\n")
+}
+
+// ---- the set-diff ---------------------------------------------------------
+
+#[test]
+fn phantom_edge_is_contradicted() {
+    let index = idx(
+        &[("src/api", "src/domain")],
+        &["src/api", "src/domain", "src/db"],
+    );
+    let md = mermaid("graph TD\n  api[src/api] --> db[src/db]");
+    let f = check(&md, "doc.md", &index);
+    assert_eq!(f.len(), 1, "{f:?}");
+    assert_eq!(f[0].verdict, Verdict::Contradicted);
+    assert_eq!(f[0].code_refs, vec!["src/api -> src/db"]);
+}
+
+#[test]
+fn drawn_real_edge_is_clean() {
+    let index = idx(&[("src/api", "src/domain")], &["src/api", "src/domain"]);
+    let md = mermaid("graph TD\n  api[src/api] --> domain[src/domain]");
+    let f = check(&md, "doc.md", &index);
+    assert!(f.iter().all(|x| !x.verdict.is_reportable()), "{f:?}");
+}
+
+#[test]
+fn ungrounded_endpoint_is_skipped() {
+    let index = idx(&[("src/api", "src/domain")], &["src/api", "src/domain"]);
+    // `User` matches no module → the edge is external, not a phantom; and `User`
+    // has no path separator so it is not a stale box either.
+    let md = mermaid("graph TD\n  User --> api[src/api]");
+    assert!(check(&md, "doc.md", &index).is_empty(), "{:?}", check(&md, "doc.md", &index));
+}
+
+#[test]
+fn undirected_edge_matches_either_direction() {
+    let index = idx(&[("src/api", "src/domain")], &["src/api", "src/domain"]);
+    // Drawn undirected; real import runs api->domain. Should be clean.
+    let md = mermaid("graph TD\n  domain[src/domain] --- api[src/api]");
+    let f = check(&md, "doc.md", &index);
+    assert!(f.iter().all(|x| !x.verdict.is_reportable()), "{f:?}");
+}
+
+#[test]
+fn stale_box_with_path_label_is_stale() {
+    let index = idx(&[("src/api", "src/domain")], &["src/api", "src/domain"]);
+    // `src/legacy` resolves to no module; the `/` marks it as module-intent.
+    let md = mermaid("graph TD\n  api[src/api] --> legacy[src/legacy]");
+    let f = check(&md, "doc.md", &index);
+    // api->legacy is skipped (legacy ungrounded); the box itself is stale.
+    assert_eq!(f.len(), 1, "{f:?}");
+    assert_eq!(f[0].verdict, Verdict::Stale);
+    assert!(f[0].claim.contains("src/legacy"));
+}
+
+#[test]
+fn missing_arrow_between_drawn_boxes_is_undocumented() {
+    let index = idx(&[("src/api", "src/domain")], &["src/api", "src/domain"]);
+    // Both boxes drawn, but the real api->domain import is not drawn.
+    let md = mermaid("graph TD\n  api[src/api]\n  domain[src/domain]");
+    let f = check(&md, "doc.md", &index);
+    assert_eq!(f.len(), 1, "{f:?}");
+    assert_eq!(f[0].verdict, Verdict::Undocumented);
+    assert_eq!(f[0].code_refs, vec!["src/api -> src/domain"]);
+}
+
+#[test]
+fn omitted_module_does_not_trigger_missing_arrow() {
+    // domain isn't in the diagram at all → no missing-arrow noise.
+    let index = idx(&[("src/api", "src/domain")], &["src/api", "src/domain"]);
+    let md = mermaid("graph TD\n  api[src/api] --> other\n");
+    // api->other is phantom only if `other` grounds; it doesn't, so skipped.
+    assert!(check(&md, "doc.md", &index).is_empty());
+}
+
+// ---- parsers --------------------------------------------------------------
+
+#[test]
+fn mermaid_parses_nodes_and_edges() {
+    let d = mermaid::parse("graph LR\n  a[Auth] --> b[DB]\n  b --> c", "o").unwrap();
+    assert_eq!(d.kind, DiagramKind::Flowchart);
+    assert_eq!(d.edges.len(), 2);
+    assert!(d.edges.iter().all(|e| e.directed));
+    assert_eq!(d.text("a"), "Auth");
+}
+
+#[test]
+fn mermaid_skips_sequence_diagram() {
+    assert!(mermaid::parse("sequenceDiagram\n  A->>B: hi", "o").is_none());
+}
+
+#[test]
+fn mermaid_undirected_edge() {
+    let d = mermaid::parse("graph TD\n  a --- b", "o").unwrap();
+    assert_eq!(d.edges.len(), 1);
+    assert!(!d.edges[0].directed);
+}
+
+#[test]
+fn plantuml_parses_components() {
+    let d = plantuml::parse("@startuml\n[Auth] --> [DB]\n@enduml", "o").unwrap();
+    assert_eq!(d.edges.len(), 1);
+    assert_eq!(d.text(&d.edges[0].from), "Auth");
+}
+
+#[test]
+fn plantuml_skips_sequence() {
+    assert!(plantuml::parse("@startuml\nAlice -> Bob : hello\n@enduml", "o").is_none());
+}
+
+#[test]
+fn dot_digraph_is_directed() {
+    let d = dot::parse("digraph G {\n  \"a\" -> \"b\";\n}", "o").unwrap();
+    assert_eq!(d.edges.len(), 1);
+    assert!(d.edges[0].directed);
+    assert_eq!(d.edges[0].from, "a");
+}
+
+#[test]
+fn dot_graph_is_undirected() {
+    let d = dot::parse("graph G {\n  a -- b;\n}", "o").unwrap();
+    assert_eq!(d.edges.len(), 1);
+    assert!(!d.edges[0].directed);
+}
+
+#[test]
+fn dot_node_label() {
+    let d = dot::parse("digraph { a [label=\"Auth\"]; a -> b; }", "o").unwrap();
+    assert_eq!(d.text("a"), "Auth");
+}
+
+// ---- source extraction ----------------------------------------------------
+
+#[test]
+fn sources_extracts_each_format() {
+    let md = "intro\n```mermaid\ngraph TD\n a-->b\n```\ntext\n```dot\ndigraph{a->b}\n```\n@startuml\n[A]-->[B]\n@enduml\n";
+    let got = sources(md);
+    assert_eq!(got.len(), 3);
+    assert_eq!(got[0].format, Format::Mermaid);
+    assert_eq!(got[1].format, Format::Dot);
+    assert_eq!(got[2].format, Format::PlantUml);
+}
+
+#[test]
+fn sources_ignores_non_diagram_fence() {
+    let md = "```rust\n@startuml not a diagram\nlet x = 1;\n```\n";
+    assert!(sources(md).is_empty());
+}

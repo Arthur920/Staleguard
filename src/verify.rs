@@ -7,27 +7,40 @@ use std::path::Path;
 
 use walkdir::WalkDir;
 
+use crate::claim::Provenance;
 use crate::extract::PathClaim;
 use crate::findings::{Finding, Verdict};
 
-/// Layer 1: every path a doc names by backtick should exist in the repo.
+/// Layer 1: every path a doc names by backtick should exist in the repo. Emits
+/// a `Supported` claim for paths that exist and a `Stale` one for those that do
+/// not; both are anchored (provenance) to the named path so drift lineage can
+/// invalidate them when that file changes.
 pub fn check_paths(claims: &[PathClaim], repo_root: &Path) -> Vec<Finding> {
     let mut findings = Vec::new();
     for c in claims {
         let direct = repo_root.join(&c.raw);
         let exists = direct.exists() || tree_contains(repo_root, &c.raw);
-        if !exists {
-            findings.push(Finding {
-                verdict: Verdict::Stale,
-                claim: format!("references `{}`", c.raw),
-                doc_path: format!("{}:{}", c.doc_path, c.line),
-                detail: format!(
-                    "Path `{}` is named in docs but does not exist in the repo.",
-                    c.raw
-                ),
-                layer: 1,
-                code_refs: Vec::new(),
-            });
+        let doc_ref = format!("{}:{}", c.doc_path, c.line);
+        let prov = Provenance::path(c.raw.clone());
+        if exists {
+            findings.push(Finding::supported(
+                format!("references `{}`", c.raw),
+                doc_ref,
+                prov,
+            ));
+        } else {
+            findings.push(
+                Finding::problem(
+                    Verdict::Stale,
+                    format!("references `{}`", c.raw),
+                    doc_ref,
+                    format!(
+                        "Path `{}` is named in docs but does not exist in the repo.",
+                        c.raw
+                    ),
+                )
+                .anchored(prov),
+            );
         }
     }
     findings
@@ -76,7 +89,11 @@ mod tests {
         let claims = extract_path_claims(md, "README.md");
         let findings = check_paths(&claims, &dir);
 
-        let flagged: Vec<&str> = findings.iter().map(|f| f.claim.as_str()).collect();
+        let flagged: Vec<&str> = findings
+            .iter()
+            .filter(|f| f.verdict.is_reportable())
+            .map(|f| f.claim.as_str())
+            .collect();
         assert!(flagged.contains(&"references `does/not/exist.toml`"));
         assert!(!flagged.contains(&"references `real.py`"));
     }
@@ -87,6 +104,7 @@ mod tests {
         fs::create_dir_all(dir.join("src")).unwrap();
         fs::write(dir.join("src/main.py"), "print('hi')\n").unwrap();
         let claims = extract_path_claims("See `src/main.py`.", "README.md");
-        assert!(check_paths(&claims, &dir).is_empty());
+        let findings = check_paths(&claims, &dir);
+        assert!(findings.iter().all(|f| !f.verdict.is_reportable()));
     }
 }

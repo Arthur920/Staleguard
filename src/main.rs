@@ -1,12 +1,16 @@
 //! shlomes command-line entry point.
 
+mod claim;
 mod code;
 mod commands;
 mod config;
 mod coverage;
+mod diagram;
 mod entrypoints;
+mod drift;
 mod extract;
 mod findings;
+mod git;
 #[cfg(feature = "ml")]
 mod retrieve;
 mod rules;
@@ -46,6 +50,17 @@ enum Commands {
         /// Max layer: 1 deterministic, 2 +retrieval, 3 +LLM (1 only for now).
         #[arg(long, default_value_t = 1)]
         layer: u8,
+        /// Drift base: only re-derive claims whose code changed since this git
+        /// ref (default: the committed ledger's last commit).
+        #[arg(long)]
+        diff: Option<String>,
+        /// Persist the drift ledger + alignment score under `.shlomes/` (run this
+        /// on the base branch to set the CI baseline).
+        #[arg(long)]
+        write_ledger: bool,
+        /// Fail if the alignment score regressed below the committed baseline.
+        #[arg(long)]
+        fail_on_regression: bool,
     },
     /// Extract and print the code index (symbols + dependency edges).
     Index {
@@ -104,7 +119,7 @@ pub(crate) fn collect_docs(root: &Path) -> Vec<PathBuf> {
         .collect()
 }
 
-fn run_check(root: &Path) -> Vec<Finding> {
+fn run_check(root: &Path, opts: &drift::Options) -> drift::Outcome {
     // Repo-wide grounding, built once and shared across every doc.
     let index = CodeIndex::build(root);
     let manifests = commands::Manifests::load(root);
@@ -136,10 +151,27 @@ fn run_check(root: &Path) -> Vec<Finding> {
             manifests.project_bins(),
         ));
         findings.extend(entrypoints::check(&text, &rel, &grounding));
+        findings.extend(diagram::check(&text, &rel, &index));
         arch_rules.extend(rules::extract_prose_rules(&text, &rel));
     }
     findings.extend(rules::check(&arch_rules, &index, root));
-    findings
+
+    // Standalone Graphviz files (`*.dot`/`*.gv`) live outside the markdown set.
+    for dot in diagram::collect_dot_files(root) {
+        if let Ok(text) = std::fs::read_to_string(&dot) {
+            let rel = dot
+                .strip_prefix(root)
+                .unwrap_or(&dot)
+                .to_string_lossy()
+                .to_string();
+            findings.extend(diagram::check_dot_file(&text, &rel, &index));
+        }
+    }
+
+    // Layer 0: git-history staleness prior, then the drift pipeline (lineage,
+    // carry-forward, fact-hash drift flag, alignment score).
+    findings.extend(drift::coupling::check(root));
+    drift::run(findings, &index, root, opts)
 }
 
 fn report(findings: &[Finding], format: Format) {
@@ -156,6 +188,35 @@ fn report(findings: &[Finding], format: Format) {
                 println!("[{}] {}: {}", f.verdict.as_str(), f.doc_path, f.detail);
             }
             println!("\n{} finding(s)", findings.len());
+        }
+    }
+}
+
+/// Report a completed drift run: the findings plus the alignment score and the
+/// lineage/regression summary.
+fn report_check(out: &drift::Outcome, format: Format) {
+    match format {
+        Format::Json => {
+            let payload = serde_json::json!({
+                "findings": out.findings,
+                "score": out.score,
+                "carried_forward": out.carried_forward,
+                "total_claims": out.total_claims,
+                "regression": out.regression.map(|(b, h)| serde_json::json!({ "base": b, "head": h })),
+            });
+            println!("{}", serde_json::to_string_pretty(&payload).unwrap());
+        }
+        Format::Text => {
+            report(&out.findings, format);
+            println!(
+                "\nalignment {:.3} | {} claim(s), {} carried forward",
+                out.score.repo, out.total_claims, out.carried_forward
+            );
+            if let Some((base, head)) = out.regression {
+                println!(
+                    "\u{2717} score regressed: {base:.3} (base) -> {head:.3} (head)"
+                );
+            }
         }
     }
 }
@@ -199,14 +260,23 @@ fn main() -> ExitCode {
             path,
             format,
             layer,
+            diff,
+            write_ledger,
+            fail_on_regression,
         } => {
             let root = std::fs::canonicalize(&path).unwrap_or(path);
             if layer > 1 {
                 eprintln!("note: layers 2-3 are not implemented yet; running layer 1.");
             }
-            let findings = run_check(&root);
-            report(&findings, format);
-            if findings.is_empty() {
+            let opts = drift::Options {
+                diff_ref: diff,
+                write_ledger,
+                fail_on_regression,
+            };
+            let out = run_check(&root, &opts);
+            report_check(&out, format);
+            // Fail on any reportable finding, or on a score regression in CI.
+            if out.findings.is_empty() && out.regression.is_none() {
                 ExitCode::SUCCESS
             } else {
                 ExitCode::FAILURE

@@ -4,6 +4,7 @@
 //! rules, and drift provenance/fingerprints. Default build (no `ml` feature).
 
 mod extract;
+pub mod facts;
 pub mod lang;
 mod resolve;
 pub mod symbol;
@@ -176,6 +177,7 @@ mod tests {
                 start_line: 1,
                 end_line: 1,
             },
+            body_span: Span::zero(),
             signature: None,
             doc: None,
             facts: Facts::default(),

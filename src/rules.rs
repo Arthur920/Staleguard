@@ -17,6 +17,7 @@ use std::sync::OnceLock;
 
 use regex::Regex;
 
+use crate::claim::Provenance;
 use crate::code::lang;
 use crate::code::CodeIndex;
 use crate::findings::{Finding, Verdict};
@@ -87,6 +88,7 @@ pub fn check(rules: &[SourcedRule], index: &CodeIndex, repo_root: &Path) -> Vec<
     let modules = index.module_set();
     let mut findings = Vec::new();
     for sr in rules {
+        let before = findings.len();
         match &sr.rule {
             Rule::ForbidEdge { from, to } => {
                 check_forbid_edge(sr, from, to, index, &modules, &mut findings)
@@ -98,8 +100,48 @@ pub fn check(rules: &[SourcedRule], index: &CodeIndex, repo_root: &Path) -> Vec<
                 check_forbid_symbol(sr, symbol, except, repo_root, &mut findings)
             }
         }
+        // A grounded/verifiable rule with no violation is a Supported claim,
+        // recorded in the ledger and scored. Ungrounded module rules are skipped
+        // by their check (unverifiable) and produce no claim at all.
+        if findings.len() == before {
+            if let Some(claim) = supported_rule(sr, &modules) {
+                findings.push(claim);
+            }
+        }
     }
     findings
+}
+
+/// A `Supported` claim for a rule that held, anchored to the modules/symbol it
+/// constrains. Returns `None` for an ungrounded module rule (those are
+/// unverifiable, not supported).
+fn supported_rule(sr: &SourcedRule, modules: &HashSet<String>) -> Option<Finding> {
+    let (claim, prov) = match &sr.rule {
+        Rule::ForbidEdge { from, to } => {
+            if !grounded(from, modules) || !grounded(to, modules) {
+                return None;
+            }
+            (
+                format!("`{from}` must not import `{to}`"),
+                Provenance::modules([from.clone(), to.clone()]),
+            )
+        }
+        Rule::Layer { module, allowed } => {
+            if !grounded(module, modules) {
+                return None;
+            }
+            let claim = if allowed.is_empty() {
+                format!("`{module}` depends on nothing")
+            } else {
+                format!("`{module}` may depend only on {}", quote_list(allowed))
+            };
+            (claim, Provenance::modules([module.clone()]))
+        }
+        Rule::ForbidSymbol { symbol, .. } => {
+            (format!("forbids `{symbol}`"), Provenance::default())
+        }
+    };
+    Some(Finding::supported(claim, sr.origin.clone(), prov))
 }
 
 fn check_forbid_edge(
@@ -182,14 +224,16 @@ fn check_forbid_symbol(
         for (i, line) in text.lines().enumerate() {
             if matcher.is_match(line) {
                 let at = format!("{module}:{}", i + 1);
-                out.push(Finding {
-                    verdict: Verdict::Contradicted,
-                    claim: format!("forbids `{symbol}`"),
-                    doc_path: sr.origin.clone(),
-                    detail: format!("Rule forbids `{symbol}`, but it appears in `{at}`."),
-                    layer: 1,
-                    code_refs: vec![at],
-                });
+                out.push(
+                    Finding::problem(
+                        Verdict::Contradicted,
+                        format!("forbids `{symbol}`"),
+                        sr.origin.clone(),
+                        format!("Rule forbids `{symbol}`, but it appears in `{at}`."),
+                    )
+                    .anchored(Provenance::modules([module.clone()]))
+                    .with_refs(vec![at]),
+                );
             }
         }
     }
@@ -197,14 +241,14 @@ fn check_forbid_symbol(
 
 /// A finding for a violated module-graph rule.
 fn violation(sr: &SourcedRule, claim: String, detail: String, from: &str, to: &str) -> Finding {
-    Finding {
-        verdict: Verdict::Contradicted,
+    Finding::problem(
+        Verdict::Contradicted,
         claim,
-        doc_path: sr.origin.clone(),
-        detail: format!("Rule violated: {detail}"),
-        layer: 1,
-        code_refs: vec![format!("{from} -> {to}")],
-    }
+        sr.origin.clone(),
+        format!("Rule violated: {detail}"),
+    )
+    .anchored(Provenance::modules([from.to_string(), to.to_string()]))
+    .with_refs(vec![format!("{from} -> {to}")])
 }
 
 // ---- matching helpers -----------------------------------------------------
@@ -212,7 +256,7 @@ fn violation(sr: &SourcedRule, claim: String, detail: String, from: &str, to: &s
 /// A module path matches an operand by exact equality, subtree prefix
 /// (`op/…`), leaf suffix (`…/op`), or interior segment (`…/op/…`) — so a
 /// conceptual name (`controllers`) matches a real path (`src/controllers`).
-fn matches(module: &str, operand: &str) -> bool {
+pub(crate) fn matches(module: &str, operand: &str) -> bool {
     let op = operand.trim_matches('/');
     module == op
         || module.starts_with(&format!("{op}/"))
@@ -221,7 +265,7 @@ fn matches(module: &str, operand: &str) -> bool {
 }
 
 /// True if an operand matches at least one real module.
-fn grounded(operand: &str, modules: &HashSet<String>) -> bool {
+pub(crate) fn grounded(operand: &str, modules: &HashSet<String>) -> bool {
     modules.iter().any(|m| matches(m, operand))
 }
 

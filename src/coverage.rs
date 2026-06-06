@@ -79,17 +79,16 @@ fn finding_for(s: &Symbol, fan_in: usize) -> Finding {
     } else {
         format!("fan-in {fan_in}")
     };
-    Finding {
-        verdict: Verdict::Undocumented,
-        claim: format!("public {} `{}` has no doc reference", kind.to_lowercase(), s.name),
-        doc_path: format!("{}:{}", s.span.path, s.span.start_line),
-        detail: format!(
+    Finding::problem(
+        Verdict::Undocumented,
+        format!("public {} `{}` has no doc reference", kind.to_lowercase(), s.name),
+        format!("{}:{}", s.span.path, s.span.start_line),
+        format!(
             "{} `{}` ({}) is documented nowhere; {}.",
             kind, s.name, s.module, reach
         ),
-        layer: 1,
-        code_refs: Vec::new(),
-    }
+    )
+    .anchored(crate::claim::Provenance::symbol(s.qualified_name.clone()))
 }
 
 fn kind_label(kind: &SymbolKind) -> String {
@@ -116,6 +115,7 @@ mod tests {
                 start_line: 1,
                 end_line: 1,
             },
+            body_span: Span::zero(),
             signature: None,
             doc: None,
             facts: Facts::default(),
