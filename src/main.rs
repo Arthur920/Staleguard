@@ -14,6 +14,8 @@ mod git;
 #[cfg(feature = "ml")]
 mod judge;
 #[cfg(feature = "ml")]
+mod rerank;
+#[cfg(feature = "ml")]
 mod retrieve;
 mod rules;
 mod verify;
@@ -190,7 +192,7 @@ fn run_check(root: &Path, opts: &drift::Options, layer: u8) -> drift::Outcome {
                     .unwrap_or(&doc)
                     .to_string_lossy()
                     .to_string();
-                claims.extend(judge::candidate_claims(&text, &rel));
+                claims.extend(judge::candidate_claims(&text, &rel, &index));
             }
         }
         claims.truncate(judge::MAX_CLAIMS);

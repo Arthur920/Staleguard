@@ -61,6 +61,15 @@ pub fn extract_prose_rules(markdown: &str, doc_path: &str) -> Vec<SourcedRule> {
         for c in never_edge_re().captures_iter(line) {
             push(Rule::ForbidEdge { from: c[1].to_string(), to: c[2].to_string() });
         }
+        // "`db` must not be imported by `api`" — reverse direction (api -> db).
+        for c in forbid_by_re().captures_iter(line) {
+            push(Rule::ForbidEdge { from: c[2].to_string(), to: c[1].to_string() });
+        }
+        // "`domain` is independent of `infra`" — symmetric: forbid both edges.
+        for c in independent_re().captures_iter(line) {
+            push(Rule::ForbidEdge { from: c[1].to_string(), to: c[2].to_string() });
+            push(Rule::ForbidEdge { from: c[2].to_string(), to: c[1].to_string() });
+        }
         for c in depends_nothing_re().captures_iter(line) {
             push(Rule::Layer { module: c[1].to_string(), allowed: Vec::new() });
         }
@@ -91,30 +100,51 @@ pub fn check(rules: &[SourcedRule], index: &CodeIndex, repo_root: &Path) -> Vec<
         let before = findings.len();
         match &sr.rule {
             Rule::ForbidEdge { from, to } => {
-                check_forbid_edge(sr, from, to, index, &modules, &mut findings)
+                check_forbid_edge(sr, from, to, index, &modules, &mut findings);
+                add_supported(sr, &modules, before, &mut findings);
             }
             Rule::Layer { module, allowed } => {
-                check_layer(sr, module, allowed, index, &modules, &mut findings)
+                check_layer(sr, module, allowed, index, &modules, &mut findings);
+                add_supported(sr, &modules, before, &mut findings);
             }
             Rule::ForbidSymbol { symbol, except } => {
-                check_forbid_symbol(sr, symbol, except, repo_root, &mut findings)
-            }
-        }
-        // A grounded/verifiable rule with no violation is a Supported claim,
-        // recorded in the ledger and scored. Ungrounded module rules are skipped
-        // by their check (unverifiable) and produce no claim at all.
-        if findings.len() == before {
-            if let Some(claim) = supported_rule(sr, &modules) {
-                findings.push(claim);
+                // The symbol check returns the modules it actually scanned; a
+                // clean rule is anchored to them so adding the symbol in any of
+                // them re-opens the claim (precise lineage, fixing the old empty
+                // provenance that could never carry forward).
+                let scanned = check_forbid_symbol(sr, symbol, except, index, repo_root, &mut findings);
+                if findings.len() == before && !scanned.is_empty() {
+                    findings.push(Finding::supported(
+                        format!("forbids `{symbol}`"),
+                        sr.origin.clone(),
+                        Provenance::modules(scanned),
+                    ));
+                }
             }
         }
     }
     findings
 }
 
-/// A `Supported` claim for a rule that held, anchored to the modules/symbol it
-/// constrains. Returns `None` for an ungrounded module rule (those are
-/// unverifiable, not supported).
+/// Record the `Supported` claim for a grounded module rule that held (no new
+/// findings since `before`). Ungrounded module rules produce nothing.
+fn add_supported(
+    sr: &SourcedRule,
+    modules: &HashSet<String>,
+    before: usize,
+    findings: &mut Vec<Finding>,
+) {
+    if findings.len() == before {
+        if let Some(claim) = supported_rule(sr, modules) {
+            findings.push(claim);
+        }
+    }
+}
+
+/// A `Supported` claim for a grounded module rule that held, anchored to the
+/// modules it constrains. Returns `None` for an ungrounded rule (unverifiable,
+/// not supported). `ForbidSymbol` is anchored to its scanned modules inline in
+/// [`check`], so it is not handled here.
 fn supported_rule(sr: &SourcedRule, modules: &HashSet<String>) -> Option<Finding> {
     let (claim, prov) = match &sr.rule {
         Rule::ForbidEdge { from, to } => {
@@ -137,9 +167,7 @@ fn supported_rule(sr: &SourcedRule, modules: &HashSet<String>) -> Option<Finding
             };
             (claim, Provenance::modules([module.clone()]))
         }
-        Rule::ForbidSymbol { symbol, .. } => {
-            (format!("forbids `{symbol}`"), Provenance::default())
-        }
+        Rule::ForbidSymbol { .. } => return None,
     };
     Some(Finding::supported(claim, sr.origin.clone(), prov))
 }
@@ -205,25 +233,38 @@ fn check_layer(
     }
 }
 
+/// Check a forbid-symbol rule. Returns the (deduped) modules it scanned so a
+/// clean rule can be anchored to them. Two passes: a textual scan of source
+/// lines, and — when the symbol resolves to exactly one indexed definition — a
+/// scan of the resolved `ref_edges` for indirect/re-exported references the text
+/// scan can't see. The ref pass is skipped on ambiguous (multi-target) symbols
+/// to keep zero false positives, and skips modules the text pass already flagged.
 fn check_forbid_symbol(
     sr: &SourcedRule,
     symbol: &str,
     except: &[String],
+    index: &CodeIndex,
     repo_root: &Path,
     out: &mut Vec<Finding>,
-) {
+) -> Vec<String> {
+    let is_excepted = |module: &str| except.iter().any(|e| matches(module, e));
     let matcher = symbol_matcher(symbol);
+    let mut scanned = Vec::new();
+    let mut text_flagged: HashSet<String> = HashSet::new();
+
     for file in lang::code_files(repo_root) {
         let module = lang::module_path(&file, repo_root);
-        if except.iter().any(|e| matches(&module, e)) {
+        if is_excepted(&module) {
             continue;
         }
+        scanned.push(module.clone());
         let Ok(text) = std::fs::read_to_string(&file) else {
             continue;
         };
         for (i, line) in text.lines().enumerate() {
             if matcher.is_match(line) {
                 let at = format!("{module}:{}", i + 1);
+                text_flagged.insert(module.clone());
                 out.push(
                     Finding::problem(
                         Verdict::Contradicted,
@@ -237,6 +278,52 @@ fn check_forbid_symbol(
             }
         }
     }
+
+    // Indirect references: only trusted when the symbol names exactly one
+    // indexed definition (name-based ref resolution is otherwise ambiguous).
+    let targets: Vec<&str> = index
+        .symbols
+        .iter()
+        .filter(|s| symbol_identifies(symbol, s))
+        .map(|s| s.qualified_name.as_str())
+        .collect();
+    if let [target] = targets[..] {
+        for edge in &index.ref_edges {
+            if edge.to_symbol != target {
+                continue;
+            }
+            let from_module = module_of(&edge.from_symbol);
+            if is_excepted(from_module) || text_flagged.contains(from_module) {
+                continue;
+            }
+            out.push(
+                Finding::problem(
+                    Verdict::Contradicted,
+                    format!("forbids `{symbol}`"),
+                    sr.origin.clone(),
+                    format!("Rule forbids `{symbol}`, but `{}` references it.", edge.from_symbol),
+                )
+                .anchored(Provenance::symbol(edge.from_symbol.clone()))
+                .with_refs(vec![edge.from_symbol.clone()]),
+            );
+        }
+    }
+
+    scanned.sort();
+    scanned.dedup();
+    scanned
+}
+
+/// Whether a forbid-symbol operand names this indexed symbol — by full
+/// `qualified_name`, by a `::`-qualified suffix, or by leaf name.
+fn symbol_identifies(operand: &str, s: &crate::code::symbol::Symbol) -> bool {
+    let leaf = operand.rsplit([':', '.']).next().unwrap_or(operand);
+    s.qualified_name == operand || s.qualified_name.ends_with(&format!("::{operand}")) || s.name == leaf
+}
+
+/// Module path of a `module::name` qualified symbol.
+fn module_of(qualified: &str) -> &str {
+    qualified.rsplit_once("::").map(|(m, _)| m).unwrap_or(qualified)
 }
 
 /// A finding for a violated module-graph rule.
@@ -327,6 +414,30 @@ fn never_edge_re() -> &'static Regex {
     })
 }
 
+/// "`X` must not be imported/used/referenced by `Y`" — captures the forbidden
+/// target (1) and the dependent (2); the edge runs Y -> X.
+fn forbid_by_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(
+            r"`([^`]+)`(?:\s+(?:layer|module|package|crate|component))?\s+(?:must|should|may|can)\s+not\s+be\s+(?:imported|used|referenced|accessed|depended\s+on)\s+(?:by|from|in)\s+(?:the\s+)?`([^`]+)`",
+        )
+        .unwrap()
+    })
+}
+
+/// "`X` is independent of `Y`" / "`X` has no dependency on `Y`" — a symmetric
+/// no-edge rule (both directions forbidden).
+fn independent_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(
+            r"`([^`]+)`(?:\s+(?:layer|module|package|crate|component))?\s+(?:is|are|stays?|remains?)\s+independent\s+(?:of|from)\s+(?:the\s+)?`([^`]+)`",
+        )
+        .unwrap()
+    })
+}
+
 fn depends_nothing_re() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
@@ -370,13 +481,39 @@ fn quoted_re() -> &'static Regex {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::code::symbol::DepEdge;
+    use crate::code::symbol::{DepEdge, Facts, RefEdge, Span, Symbol, SymbolKind, Visibility};
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     fn edge(from: &str, to: &str) -> DepEdge {
         DepEdge {
             from_module: from.to_string(),
             to_module: to.to_string(),
         }
+    }
+
+    fn symbol(name: &str, qualified: &str, module: &str) -> Symbol {
+        Symbol {
+            qualified_name: qualified.to_string(),
+            name: name.to_string(),
+            kind: SymbolKind::Class,
+            visibility: Visibility::Public,
+            module: module.to_string(),
+            span: Span::zero(),
+            body_span: Span::zero(),
+            signature: None,
+            doc: None,
+            facts: Facts::default(),
+            calls: Vec::new(),
+            members: Vec::new(),
+        }
+    }
+
+    fn scratch_dir(tag: &str) -> std::path::PathBuf {
+        let nanos = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        let dir = std::env::temp_dir().join(format!("shlomes-rules-{tag}-{nanos}"));
+        fs::create_dir_all(&dir).unwrap();
+        dir
     }
 
     fn index(edges: Vec<DepEdge>) -> CodeIndex {
@@ -510,5 +647,71 @@ mod tests {
         // "no `foo`" without a use/call signal must not become a rule.
         let md = "There is no `config` file in this layout.";
         assert!(extract_prose_rules(md, "ARCH.md").is_empty());
+    }
+
+    #[test]
+    fn prose_forbid_by_reverses_direction() {
+        let md = "`db` must not be imported by `controllers`.";
+        let rules = extract_prose_rules(md, "ARCH.md");
+        assert_eq!(
+            rules[0].rule,
+            Rule::ForbidEdge { from: "controllers".into(), to: "db".into() }
+        );
+    }
+
+    #[test]
+    fn prose_independent_is_symmetric() {
+        let md = "`domain` is independent of `infra`.";
+        let kinds: Vec<Rule> = extract_prose_rules(md, "ARCH.md").into_iter().map(|s| s.rule).collect();
+        assert!(kinds.contains(&Rule::ForbidEdge { from: "domain".into(), to: "infra".into() }));
+        assert!(kinds.contains(&Rule::ForbidEdge { from: "infra".into(), to: "domain".into() }));
+    }
+
+    #[test]
+    fn clean_forbid_symbol_is_anchored_to_scanned_modules() {
+        let dir = scratch_dir("clean-symbol");
+        fs::write(dir.join("safe.rs"), "fn ok() {}\n").unwrap();
+        let rules = rule(Rule::ForbidSymbol { symbol: "eval".into(), except: vec![] });
+        let f = check(&rules, &index(vec![]), &dir);
+        let supported: Vec<&Finding> = f.iter().filter(|x| x.verdict == Verdict::Supported).collect();
+        assert_eq!(supported.len(), 1);
+        assert!(!supported[0].provenance.modules.is_empty(), "must anchor to scanned modules");
+    }
+
+    #[test]
+    fn forbid_symbol_catches_indirect_ref() {
+        let mut idx = index(vec![]);
+        idx.symbols = vec![
+            symbol("Client", "src/legacy::Client", "src/legacy"),
+            symbol("run", "src/app::run", "src/app"),
+        ];
+        idx.ref_edges = vec![RefEdge {
+            from_symbol: "src/app::run".into(),
+            to_symbol: "src/legacy::Client".into(),
+        }];
+        let rules = rule(Rule::ForbidSymbol { symbol: "legacy::Client".into(), except: vec![] });
+        // Empty repo dir → text scan finds nothing; only the ref edge fires.
+        let f = check(&rules, &idx, &scratch_dir("indirect"));
+        assert!(f
+            .iter()
+            .any(|x| x.verdict == Verdict::Contradicted && x.code_refs == vec!["src/app::run"]));
+    }
+
+    #[test]
+    fn forbid_symbol_skips_ambiguous_indirect_ref() {
+        let mut idx = index(vec![]);
+        // Two symbols share the leaf `Client` → ambiguous → no ref-edge findings.
+        idx.symbols = vec![
+            symbol("Client", "src/legacy::Client", "src/legacy"),
+            symbol("Client", "src/modern::Client", "src/modern"),
+            symbol("run", "src/app::run", "src/app"),
+        ];
+        idx.ref_edges = vec![RefEdge {
+            from_symbol: "src/app::run".into(),
+            to_symbol: "src/legacy::Client".into(),
+        }];
+        let rules = rule(Rule::ForbidSymbol { symbol: "Client".into(), except: vec![] });
+        let f = check(&rules, &idx, &scratch_dir("ambiguous"));
+        assert!(f.iter().all(|x| x.verdict != Verdict::Contradicted));
     }
 }

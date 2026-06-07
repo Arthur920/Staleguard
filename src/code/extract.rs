@@ -123,6 +123,10 @@ fn extract_symbols_and_refs(
                 kind = SymbolKind::Enum;
                 enum_variants(node, source, language)
             }
+            Some(node) if language == Language::Python && is_python_enum(node, source) => {
+                kind = SymbolKind::Enum;
+                python_enum_members(node, source)
+            }
             _ => Vec::new(),
         };
 
@@ -169,10 +173,64 @@ fn extract_symbols_and_refs(
     (symbols, refs)
 }
 
-/// Whether an AST node kind denotes an enum definition (Rust `enum_item`,
-/// Java/TS `enum_declaration`). Python enums are class-based and not detected.
+/// Whether an AST node kind denotes a first-class enum definition (Rust
+/// `enum_item`, Java/TS `enum_declaration`). Python enums are class-based and
+/// handled separately by [`is_python_enum`].
 fn is_enum_node(kind: &str) -> bool {
     matches!(kind, "enum_item" | "enum_declaration")
+}
+
+/// Whether a Python `class_definition` derives from an enum base
+/// (`Enum`/`IntEnum`/`StrEnum`/`Flag`/`IntFlag`, bare or `enum.`-qualified).
+fn is_python_enum(node: tree_sitter::Node, source: &[u8]) -> bool {
+    if node.kind() != "class_definition" {
+        return false;
+    }
+    let Some(supers) = node.child_by_field_name("superclasses") else {
+        return false;
+    };
+    let mut cursor = supers.walk();
+    for c in supers.children(&mut cursor) {
+        let base = c.utf8_text(source).unwrap_or("");
+        let leaf = base.rsplit('.').next().unwrap_or(base);
+        if matches!(leaf, "Enum" | "IntEnum" | "StrEnum" | "Flag" | "IntFlag") {
+            return true;
+        }
+    }
+    false
+}
+
+/// Member names of a Python enum: the simple `NAME = value` assignments at the
+/// class body's top level. Skips dunder/private names and method definitions.
+fn python_enum_members(node: tree_sitter::Node, source: &[u8]) -> Vec<String> {
+    let Some(body) = node.child_by_field_name("body") else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    let mut cursor = body.walk();
+    for stmt in body.children(&mut cursor) {
+        if stmt.kind() != "expression_statement" {
+            continue;
+        }
+        let mut inner = stmt.walk();
+        for child in stmt.children(&mut inner) {
+            if child.kind() != "assignment" {
+                continue;
+            }
+            let Some(left) = child.child_by_field_name("left") else {
+                continue;
+            };
+            if left.kind() != "identifier" {
+                continue;
+            }
+            if let Ok(name) = left.utf8_text(source) {
+                if !name.starts_with('_') {
+                    out.push(name.to_string());
+                }
+            }
+        }
+    }
+    out
 }
 
 /// Variant names of an enum definition node. Per-language variant node kinds;
@@ -403,6 +461,25 @@ mod tests {
         let (syms, _refs) = extract_symbols_and_refs(Language::Rust, src, "m", "m.rs");
         let en = syms.iter().find(|s| s.name == "State").unwrap();
         assert_eq!(en.members, vec!["Idle", "Running", "Done"]);
+    }
+
+    #[test]
+    fn python_class_enum_members_are_extracted() {
+        let src = b"from enum import Enum\n\
+                    class State(Enum):\n    IDLE = 1\n    RUNNING = 2\n    DONE = 3\n";
+        let (syms, _refs) = extract_symbols_and_refs(Language::Python, src, "m", "m.py");
+        let en = syms.iter().find(|s| s.name == "State").unwrap();
+        assert_eq!(en.kind, SymbolKind::Enum);
+        assert_eq!(en.members, vec!["IDLE", "RUNNING", "DONE"]);
+    }
+
+    #[test]
+    fn python_plain_class_is_not_an_enum() {
+        let src = b"class Plain:\n    X = 1\n    def m(self):\n        pass\n";
+        let (syms, _refs) = extract_symbols_and_refs(Language::Python, src, "m", "m.py");
+        let cls = syms.iter().find(|s| s.name == "Plain").unwrap();
+        assert_ne!(cls.kind, SymbolKind::Enum);
+        assert!(cls.members.is_empty());
     }
 
     #[test]

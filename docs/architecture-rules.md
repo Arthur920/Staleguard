@@ -64,13 +64,16 @@ shared substrate rather than reimplementing AST import-walking three times.
 
 The LLM-free tier now reaches: existence + structural + version + broken-example
 + **architectural-rule compliance** + co-change staleness + the regression gate.
-The LLM stays confined to the prose-contradiction slice that *isn't* expressible
-as a graph/AST rule.
+The Layer-3 judge — implemented as a local **NLI cross-encoder**, not a
+generative LLM (see the README) — stays confined to the prose-contradiction
+slice that *isn't* expressible as a graph/AST rule.
 
 ## Open questions
-- Rule extraction from prose: which assertion patterns are reliable enough to run
-  deterministically vs. defer to the judge? Start with explicit forbidden-edge /
-  layering phrasings.
+- ~~Rule extraction from prose: which assertion patterns are reliable enough to
+  run deterministically vs. defer to the judge?~~ **Resolved:** forbidden-edge
+  (incl. reverse "imported by" and symmetric "independent of"), layering
+  ("depends on nothing" / "only depends on"), and forbid-symbol phrasings run
+  deterministically; everything else defers to the Layer-3 judge.
 - Rule DSL: adopt an existing format (sentrux `rules.toml`, dependency-cruiser
   config) or define our own keyed to doc provenance?
 - Build our own graph extractor vs. depend on an external tool's output?

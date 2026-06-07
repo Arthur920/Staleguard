@@ -1,27 +1,40 @@
 //! Layer 2 retrieval: local code embeddings via fastembed + the jina code model.
 //!
 //! Fully offline after the first model download (`jina-embeddings-v2-base-code`,
-//! ~160 MB, cached by fastembed). Code is chunked into overlapping line windows,
-//! embedded, and queried by cosine similarity. AST/tree-sitter chunking and a
-//! content-hash vector cache are the planned next steps.
+//! ~160 MB, cached by fastembed). Code is chunked on **symbol boundaries** from
+//! the tree-sitter index (falling back to overlapping line windows for files
+//! with no extractable symbols), embedded, and queried by cosine similarity.
+//!
+//! Embeddings are cached on disk under `.shlomes/` keyed by a content hash, so
+//! unchanged chunks (and unchanged queries) are free on re-run; the model is
+//! only loaded when something actually needs embedding. An optional reranker
+//! ([`crate::rerank`]) sharpens the top-k before it reaches the judge.
 
-use std::path::Path;
+use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 use fastembed::{
     InitOptionsUserDefined, Pooling, TextEmbedding, TokenizerFiles, UserDefinedEmbeddingModel,
 };
 use hf_hub::api::sync::Api;
+use serde::{Deserialize, Serialize};
 
+use crate::claim::fnv1a;
 use crate::code::lang;
+use crate::code::CodeIndex;
 
 /// HuggingFace repo + the int8-quantized ONNX (162 MB vs the 642 MB fp32 that
 /// fastembed's built-in `JinaEmbeddingsV2BaseCode` variant would download).
 const MODEL_REPO: &str = "jinaai/jina-embeddings-v2-base-code";
 const QUANTIZED_ONNX: &str = "onnx/model_quantized.onnx";
 
+/// Fallback line-window chunking (files with no extractable symbols).
 const CHUNK_LINES: usize = 40;
 const CHUNK_OVERLAP: usize = 10;
+/// A symbol body longer than this is split into windows so a giant function
+/// doesn't become one unwieldy (and token-limit-busting) chunk.
+const MAX_SYMBOL_LINES: usize = 80;
 
 struct Chunk {
     path: String,
@@ -38,11 +51,12 @@ pub struct Hit {
     pub text: String,
 }
 
-fn chunk_file(path: &str, content: &str) -> Vec<Chunk> {
-    let lines: Vec<&str> = content.lines().collect();
-    let mut chunks = Vec::new();
+// ---- chunking -------------------------------------------------------------
+
+/// Overlapping line-window chunks — the fallback when a file yields no symbols.
+fn window_chunks(path: &str, lines: &[&str], base_line: usize, out: &mut Vec<Chunk>) {
     if lines.is_empty() {
-        return chunks;
+        return;
     }
     let step = CHUNK_LINES.saturating_sub(CHUNK_OVERLAP).max(1);
     let mut start = 0;
@@ -50,9 +64,9 @@ fn chunk_file(path: &str, content: &str) -> Vec<Chunk> {
         let end = (start + CHUNK_LINES).min(lines.len());
         let text = lines[start..end].join("\n");
         if !text.trim().is_empty() {
-            chunks.push(Chunk {
+            out.push(Chunk {
                 path: path.to_string(),
-                start_line: start + 1,
+                start_line: base_line + start,
                 text,
             });
         }
@@ -61,8 +75,142 @@ fn chunk_file(path: &str, content: &str) -> Vec<Chunk> {
         }
         start += step;
     }
+}
+
+/// Reduce a file's symbol body spans to top-level ones: drop any span strictly
+/// contained within another (a method inside its class), so chunks don't nest.
+fn top_level_spans(mut spans: Vec<(usize, usize)>) -> Vec<(usize, usize)> {
+    spans.sort_by_key(|&(s, e)| (s, std::cmp::Reverse(e)));
+    let mut kept: Vec<(usize, usize)> = Vec::new();
+    for (s, e) in spans {
+        let contained = kept.iter().any(|&(ks, ke)| ks <= s && e <= ke);
+        if !contained {
+            kept.push((s, e));
+        }
+    }
+    kept
+}
+
+/// Chunk one file's covered symbol spans; large bodies are windowed.
+fn symbol_chunks(path: &str, lines: &[&str], spans: &[(usize, usize)], out: &mut Vec<Chunk>) {
+    for &(start, end) in spans {
+        // body_span lines are 1-based and inclusive.
+        let (s, e) = (start.saturating_sub(1), end.min(lines.len()));
+        if s >= e {
+            continue;
+        }
+        let body = &lines[s..e];
+        if e - s <= MAX_SYMBOL_LINES {
+            let text = body.join("\n");
+            if !text.trim().is_empty() {
+                out.push(Chunk {
+                    path: path.to_string(),
+                    start_line: start,
+                    text,
+                });
+            }
+        } else {
+            window_chunks(path, body, start, out);
+        }
+    }
+}
+
+/// Collect chunks for the whole repo: symbol-aligned where the index has
+/// symbols for a file, line-windowed otherwise.
+fn collect_chunks(repo_root: &Path, index: &CodeIndex) -> Vec<Chunk> {
+    let mut spans_by_file: HashMap<&str, Vec<(usize, usize)>> = HashMap::new();
+    for sym in &index.symbols {
+        let span = &sym.body_span;
+        if span.path.is_empty() || span.start_line == 0 || span.end_line < span.start_line {
+            continue;
+        }
+        spans_by_file
+            .entry(span.path.as_str())
+            .or_default()
+            .push((span.start_line, span.end_line));
+    }
+
+    let mut chunks = Vec::new();
+    for p in lang::code_files(repo_root) {
+        let Ok(content) = std::fs::read_to_string(&p) else {
+            continue;
+        };
+        let rel = p
+            .strip_prefix(repo_root)
+            .unwrap_or(&p)
+            .to_string_lossy()
+            .to_string();
+        let lines: Vec<&str> = content.lines().collect();
+        match spans_by_file.remove(rel.as_str()) {
+            Some(spans) if !spans.is_empty() => {
+                symbol_chunks(&rel, &lines, &top_level_spans(spans), &mut chunks)
+            }
+            _ => window_chunks(&rel, &lines, 1, &mut chunks),
+        }
+    }
     chunks
 }
+
+// ---- embedding cache ------------------------------------------------------
+
+/// On-disk embedding cache keyed by content hash. Vectors are stored already
+/// normalized. Tagged with the model id so switching models invalidates it.
+#[derive(Default, Serialize, Deserialize)]
+struct EmbedCache {
+    model: String,
+    /// hex(fnv1a(text)) -> normalized embedding.
+    vectors: HashMap<String, Vec<f32>>,
+    #[serde(skip)]
+    dirty: bool,
+}
+
+impl EmbedCache {
+    fn path(repo_root: &Path) -> PathBuf {
+        repo_root.join(".shlomes").join("embeddings.json")
+    }
+
+    fn load(repo_root: &Path) -> EmbedCache {
+        let cache: Option<EmbedCache> = std::fs::read(Self::path(repo_root))
+            .ok()
+            .and_then(|b| serde_json::from_slice(&b).ok());
+        match cache {
+            // A cache from a different model lives in a different vector space.
+            Some(c) if c.model == MODEL_REPO => c,
+            _ => EmbedCache {
+                model: MODEL_REPO.to_string(),
+                ..Default::default()
+            },
+        }
+    }
+
+    fn get(&self, text: &str) -> Option<&Vec<f32>> {
+        self.vectors.get(&key(text))
+    }
+
+    fn insert(&mut self, text: &str, vec: Vec<f32>) {
+        self.vectors.insert(key(text), vec);
+        self.dirty = true;
+    }
+
+    fn save(&self, repo_root: &Path) {
+        if !self.dirty {
+            return;
+        }
+        let path = Self::path(repo_root);
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        if let Ok(bytes) = serde_json::to_vec(self) {
+            let _ = std::fs::write(path, bytes);
+        }
+    }
+}
+
+fn key(text: &str) -> String {
+    format!("{:016x}", fnv1a(text))
+}
+
+// ---- vector math ----------------------------------------------------------
 
 fn normalize(v: &mut [f32]) {
     let norm = v.iter().map(|x| x * x).sum::<f32>().sqrt();
@@ -78,21 +226,7 @@ fn cosine(a: &[f32], b: &[f32]) -> f32 {
     a.iter().zip(b).map(|(x, y)| x * y).sum()
 }
 
-fn collect_chunks(repo_root: &Path) -> Vec<Chunk> {
-    let mut chunks = Vec::new();
-    for p in lang::code_files(repo_root) {
-        let Ok(content) = std::fs::read_to_string(&p) else {
-            continue;
-        };
-        let rel = p
-            .strip_prefix(repo_root)
-            .unwrap_or(&p)
-            .to_string_lossy()
-            .to_string();
-        chunks.extend(chunk_file(&rel, &content));
-    }
-    chunks
-}
+// ---- model ----------------------------------------------------------------
 
 /// Load jina-embeddings-v2-base-code from its int8-quantized ONNX. fastembed's
 /// built-in variant hardcodes the fp32 file, so we fetch the quantized weights
@@ -112,53 +246,129 @@ fn new_model() -> Result<TextEmbedding> {
     };
 
     let model = UserDefinedEmbeddingModel::new(onnx, tokenizer_files).with_pooling(Pooling::Mean);
-    Ok(TextEmbedding::try_new_from_user_defined(
-        model,
-        InitOptionsUserDefined::new(),
-    )?)
+    TextEmbedding::try_new_from_user_defined(model, InitOptionsUserDefined::new())
 }
 
-/// Embed every code chunk in the repo, then return the top-`k` chunks for each
-/// query by cosine similarity. Result is parallel to `queries`.
+/// Embed `texts`, using the cache for hits and the model for misses. The model
+/// is loaded only if at least one text is missing. Returns a vector per input,
+/// parallel to `texts`, all normalized.
+fn embed_cached(texts: &[String], cache: &mut EmbedCache) -> Result<Vec<Vec<f32>>> {
+    // Unique missing texts (dedup so duplicate chunks embed once).
+    let mut needed: Vec<&str> = Vec::new();
+    let mut seen: HashSet<String> = HashSet::new();
+    for t in texts {
+        if cache.get(t).is_none() && seen.insert(key(t)) {
+            needed.push(t.as_str());
+        }
+    }
+    if !needed.is_empty() {
+        let mut model = new_model()?;
+        let mut vecs = model.embed(needed.clone(), None)?;
+        for (t, v) in needed.iter().zip(vecs.iter_mut()) {
+            normalize(v);
+            cache.insert(t, v.clone());
+        }
+    }
+    Ok(texts
+        .iter()
+        .map(|t| cache.get(t).cloned().unwrap_or_default())
+        .collect())
+}
+
+// ---- retrieval ------------------------------------------------------------
+
+/// Build the code index, chunk it, then return the top-`k` chunks for each query
+/// by cosine similarity. If a reranker is configured ([`crate::rerank`]),
+/// over-fetch by cosine and rerank down to `k`. Result is parallel to `queries`.
 pub fn retrieve(repo_root: &Path, queries: &[String], k: usize) -> Result<Vec<Vec<Hit>>> {
-    let chunks = collect_chunks(repo_root);
+    let index = CodeIndex::build(repo_root);
+    let chunks = collect_chunks(repo_root, &index);
     if chunks.is_empty() {
         return Ok(queries.iter().map(|_| Vec::new()).collect());
     }
 
-    let mut model = new_model()?;
+    let mut cache = EmbedCache::load(repo_root);
+    let chunk_texts: Vec<String> = chunks.iter().map(|c| c.text.clone()).collect();
+    let chunk_vecs = embed_cached(&chunk_texts, &mut cache)?;
+    let query_vecs = embed_cached(queries, &mut cache)?;
+    cache.save(repo_root);
 
-    let chunk_texts: Vec<&str> = chunks.iter().map(|c| c.text.as_str()).collect();
-    let mut chunk_vecs = model.embed(chunk_texts, None)?;
-    for v in chunk_vecs.iter_mut() {
-        normalize(v);
-    }
-
-    let mut query_vecs = model.embed(queries, None)?;
-    for v in query_vecs.iter_mut() {
-        normalize(v);
-    }
+    let mut reranker = crate::rerank::Reranker::from_env()?;
+    // Over-fetch before reranking so the reranker can promote chunks cosine ranked
+    // just outside the top-k.
+    let fetch = if reranker.is_some() { (k * 4).max(k) } else { k };
 
     let mut results = Vec::with_capacity(queries.len());
-    for qv in &query_vecs {
+    for (qi, qv) in query_vecs.iter().enumerate() {
         let mut scored: Vec<(f32, usize)> = chunk_vecs
             .iter()
             .enumerate()
             .map(|(i, cv)| (cosine(qv, cv), i))
             .collect();
         scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
-        scored.truncate(k);
-        results.push(
-            scored
-                .into_iter()
-                .map(|(score, i)| Hit {
-                    path: chunks[i].path.clone(),
-                    start_line: chunks[i].start_line,
-                    score,
-                    text: chunks[i].text.clone(),
-                })
-                .collect(),
-        );
+        scored.truncate(fetch);
+
+        let mut hits: Vec<Hit> = scored
+            .into_iter()
+            .map(|(score, i)| Hit {
+                path: chunks[i].path.clone(),
+                start_line: chunks[i].start_line,
+                score,
+                text: chunks[i].text.clone(),
+            })
+            .collect();
+
+        if let Some(rr) = reranker.as_mut() {
+            let passages: Vec<String> = hits.iter().map(|h| h.text.clone()).collect();
+            let scores = rr.scores(&queries[qi], &passages)?;
+            for (h, s) in hits.iter_mut().zip(scores) {
+                h.score = s;
+            }
+            hits.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+        }
+        hits.truncate(k);
+        results.push(hits);
     }
     Ok(results)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn top_level_spans_drop_nested() {
+        // class (1..20) with two methods inside -> only the class survives.
+        let spans = vec![(1, 20), (3, 8), (10, 18)];
+        assert_eq!(top_level_spans(spans), vec![(1, 20)]);
+    }
+
+    #[test]
+    fn top_level_spans_keep_siblings() {
+        let spans = vec![(1, 5), (7, 12)];
+        let kept = top_level_spans(spans);
+        assert!(kept.contains(&(1, 5)) && kept.contains(&(7, 12)));
+    }
+
+    #[test]
+    fn symbol_chunk_slices_body_lines() {
+        let lines: Vec<&str> = "a\nb\nc\nd\ne".lines().collect();
+        let mut out = Vec::new();
+        symbol_chunks("f.rs", &lines, &[(2, 4)], &mut out);
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].start_line, 2);
+        assert_eq!(out[0].text, "b\nc\nd");
+    }
+
+    #[test]
+    fn cache_round_trips_by_content() {
+        let mut c = EmbedCache {
+            model: MODEL_REPO.to_string(),
+            ..Default::default()
+        };
+        assert!(c.get("hello").is_none());
+        c.insert("hello", vec![1.0, 0.0]);
+        assert_eq!(c.get("hello"), Some(&vec![1.0, 0.0]));
+        assert!(c.dirty);
+    }
 }

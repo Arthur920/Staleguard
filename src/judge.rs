@@ -21,16 +21,20 @@
 //! whole reason this layer exists.
 
 use std::borrow::Cow;
+use std::collections::HashSet;
 use std::path::Path;
+use std::sync::OnceLock;
 
 use anyhow::{anyhow, Result};
 use hf_hub::api::sync::Api;
 use ort::session::{Session, SessionInputValue};
 use ort::value::Tensor;
+use regex::Regex;
 use serde_json::Value as Json;
-use tokenizers::{Tokenizer, TruncationParams};
+use tokenizers::{Encoding, Tokenizer, TruncationParams};
 
 use crate::claim::Provenance;
+use crate::code::CodeIndex;
 use crate::findings::{Finding, Verdict};
 use crate::retrieve;
 
@@ -45,11 +49,14 @@ pub const EVIDENCE_K: usize = 5;
 /// (claim, evidence) pair, so this bounds model cost.
 pub const MAX_CLAIMS: usize = 300;
 
-/// A behavioural doc claim awaiting a Layer 3 verdict: the prose under test plus
-/// its `path:line` origin.
+/// A behavioural doc claim awaiting a Layer 3 verdict: the prose under test, its
+/// `path:line` origin, and the code [`Provenance`] its backtick tokens ground to
+/// (so a `Supported` verdict is ledgerable and re-opens via the Layer 0
+/// fingerprint flag when that code changes).
 pub struct ProseClaim {
     pub text: String,
     pub doc_ref: String,
+    pub provenance: Provenance,
 }
 
 /// Which output index corresponds to each NLI class. Read from the model's
@@ -141,65 +148,93 @@ impl Judge {
         })
     }
 
-    /// One forward pass over a `(premise, hypothesis)` pair. Returns
-    /// `[p_contradiction, p_entailment, p_neutral]`, reordered into class
-    /// semantics regardless of the model's native index order.
-    fn classify(&mut self, premise: &str, hypothesis: &str) -> Result<[f32; 3]> {
-        let enc = self
-            .tokenizer
-            .encode((premise, hypothesis), true)
+    /// One batched forward pass over many `(premise, hypothesis)` pairs. Pairs
+    /// are padded to the batch's longest sequence (mask 0 on pad positions).
+    /// Returns one `[p_contradiction, p_entailment, p_neutral]` per pair,
+    /// reordered into class semantics regardless of the model's native order.
+    fn classify_batch(&mut self, pairs: &[(&str, &str)]) -> Result<Vec<[f32; 3]>> {
+        if pairs.is_empty() {
+            return Ok(Vec::new());
+        }
+        let encs: Vec<Encoding> = pairs
+            .iter()
+            .map(|(p, h)| self.tokenizer.encode((*p, *h), true))
+            .collect::<std::result::Result<_, _>>()
             .map_err(|e| anyhow!("tokenize: {e}"))?;
 
-        let ids: Vec<i64> = enc.get_ids().iter().map(|&x| x as i64).collect();
-        let mask: Vec<i64> = enc.get_attention_mask().iter().map(|&x| x as i64).collect();
-        let seq = ids.len() as i64;
+        let n = encs.len();
+        let max_len = encs.iter().map(|e| e.get_ids().len()).max().unwrap_or(0).max(1);
+        let mut ids = vec![0i64; n * max_len];
+        let mut mask = vec![0i64; n * max_len];
+        let mut types = vec![0i64; n * max_len];
+        for (row, e) in encs.iter().enumerate() {
+            let base = row * max_len;
+            for (c, &id) in e.get_ids().iter().enumerate() {
+                ids[base + c] = id as i64;
+            }
+            for (c, &m) in e.get_attention_mask().iter().enumerate() {
+                mask[base + c] = m as i64;
+            }
+            for (c, &t) in e.get_type_ids().iter().enumerate() {
+                types[base + c] = t as i64;
+            }
+        }
 
+        let shape = vec![n as i64, max_len as i64];
         let mut inputs = ort::inputs![
-            "input_ids" => Tensor::from_array((vec![1i64, seq], ids))?,
-            "attention_mask" => Tensor::from_array((vec![1i64, seq], mask))?,
+            "input_ids" => Tensor::from_array((shape.clone(), ids))?,
+            "attention_mask" => Tensor::from_array((shape.clone(), mask))?,
         ];
         if self.needs_token_types {
-            let types: Vec<i64> = enc.get_type_ids().iter().map(|&x| x as i64).collect();
             inputs.push((
                 Cow::from("token_type_ids"),
-                SessionInputValue::from(Tensor::from_array((vec![1i64, seq], types))?),
+                SessionInputValue::from(Tensor::from_array((shape, types))?),
             ));
         }
 
         let outputs = self.session.run(inputs)?;
         let (_, logits) = outputs[0].try_extract_tensor::<f32>()?;
-        let probs = softmax(logits);
-
-        Ok([
-            probs[self.labels.contra],
-            probs[self.labels.entail],
-            probs[self.labels.neutral],
-        ])
+        let n_labels = logits.len() / n;
+        let mut out = Vec::with_capacity(n);
+        for row in 0..n {
+            let probs = softmax(&logits[row * n_labels..(row + 1) * n_labels]);
+            out.push([
+                probs[self.labels.contra],
+                probs[self.labels.entail],
+                probs[self.labels.neutral],
+            ]);
+        }
+        Ok(out)
     }
 
-    /// Judge a claim against its retrieved evidence. Max-pools entailment and
-    /// contradiction across the chunks, then decides. Contradiction is the
-    /// differentiating signal, so it must clear the threshold *and* out-weigh
-    /// entailment before we flag drift; otherwise a strong entailment supports
-    /// the claim, and anything weaker is `unverifiable`. Returns the verdict and
-    /// the confidence behind it.
+    /// Judge a claim against its retrieved evidence in one batched pass.
+    /// Max-pools entailment and contradiction across the chunks, then
+    /// [`decide`]s. Returns the verdict and the confidence behind it.
     pub fn judge(&mut self, claim: &str, evidence: &[String]) -> Result<(Verdict, f32)> {
         if evidence.is_empty() {
             return Ok((Verdict::Unverifiable, 0.0));
         }
+        let pairs: Vec<(&str, &str)> = evidence.iter().map(|ev| (ev.as_str(), claim)).collect();
         let (mut best_entail, mut best_contra) = (0.0f32, 0.0f32);
-        for ev in evidence {
-            let [contra, entail, _neutral] = self.classify(ev, claim)?;
+        for [contra, entail, _neutral] in self.classify_batch(&pairs)? {
             best_entail = best_entail.max(entail);
             best_contra = best_contra.max(contra);
         }
-        if best_contra >= self.threshold && best_contra >= best_entail {
-            Ok((Verdict::Contradicted, best_contra))
-        } else if best_entail >= self.threshold {
-            Ok((Verdict::Supported, best_entail))
-        } else {
-            Ok((Verdict::Unverifiable, best_entail.max(best_contra)))
-        }
+        Ok(decide(best_entail, best_contra, self.threshold))
+    }
+}
+
+/// The verdict rule (pure, model-free, unit-tested). Contradiction is the
+/// differentiating signal, so it must clear the threshold *and* out-weigh
+/// entailment before we flag drift; otherwise a strong entailment supports the
+/// claim, and anything weaker is `unverifiable`.
+fn decide(best_entail: f32, best_contra: f32, threshold: f32) -> (Verdict, f32) {
+    if best_contra >= threshold && best_contra >= best_entail {
+        (Verdict::Contradicted, best_contra)
+    } else if best_entail >= threshold {
+        (Verdict::Supported, best_entail)
+    } else {
+        (Verdict::Unverifiable, best_entail.max(best_contra))
     }
 }
 
@@ -223,9 +258,16 @@ pub fn check(root: &Path, claims: &[ProseClaim], k: usize) -> Result<Vec<Finding
             .iter()
             .map(|h| format!("{}:{}", h.path, h.start_line))
             .collect();
-        let prov = Provenance {
-            paths: hits.iter().map(|h| h.path.clone()).collect(),
-            ..Default::default()
+        // Prefer the claim's own grounding (symbols/modules — survives moves and
+        // feeds the fingerprint flag); fall back to the evidence files only when
+        // the claim grounded to nothing.
+        let prov = if claim.provenance.is_empty() {
+            Provenance {
+                paths: hits.iter().map(|h| h.path.clone()).collect(),
+                ..Default::default()
+            }
+        } else {
+            claim.provenance.clone()
         };
 
         let (verdict, conf) = judge.judge(&claim.text, &evidence)?;
@@ -247,10 +289,12 @@ pub fn check(root: &Path, claims: &[ProseClaim], k: usize) -> Result<Vec<Finding
 }
 
 /// Pull candidate behavioural claims from doc prose: lines that reference code
-/// (an inline backtick span) and read like a sentence. Deliberately heuristic —
-/// the NLI judge is the filter, and the confidence threshold keeps weak verdicts
-/// out of the report. Skips fenced code, headings, and table rows.
-pub fn candidate_claims(text: &str, doc_path: &str) -> Vec<ProseClaim> {
+/// (an inline backtick span) and read like a sentence. Each claim's backtick
+/// tokens are grounded to the code index. Deliberately heuristic — the NLI judge
+/// is the filter, and the confidence threshold keeps weak verdicts out of the
+/// report. Skips fenced code, headings, and table rows.
+pub fn candidate_claims(text: &str, doc_path: &str, index: &CodeIndex) -> Vec<ProseClaim> {
+    let modules = index.module_set();
     let mut out = Vec::new();
     let mut in_fence = false;
     for (i, raw) in text.lines().enumerate() {
@@ -266,18 +310,49 @@ pub fn candidate_claims(text: &str, doc_path: &str) -> Vec<ProseClaim> {
             continue;
         }
         let cleaned = line
-            .trim_start_matches(|c: char| matches!(c, '-' | '*' | '>' | ' ' | '\t'))
+            .trim_start_matches(['-', '*', '>', ' ', '\t'])
             .trim()
             .to_string();
         if cleaned.split_whitespace().count() < 6 {
             continue;
         }
+        let provenance = ground_claim(&cleaned, index, &modules);
         out.push(ProseClaim {
             text: cleaned,
             doc_ref: format!("{doc_path}:{}", i + 1),
+            provenance,
         });
     }
     out
+}
+
+/// Ground a claim's backtick tokens to code: each token that names an indexed
+/// symbol becomes a symbol anchor (preferred — survives moves), else a module
+/// anchor if it matches a real module path. Tokens that match neither (paths,
+/// commands, prose) are ignored.
+fn ground_claim(line: &str, index: &CodeIndex, modules: &HashSet<String>) -> Provenance {
+    let mut prov = Provenance::default();
+    for tok in backtick_tokens(line) {
+        if let Some(sym) = index.symbols.iter().find(|s| {
+            s.qualified_name == tok || s.name == tok || s.qualified_name.ends_with(&format!("::{tok}"))
+        }) {
+            if !prov.symbols.contains(&sym.qualified_name) {
+                prov.symbols.push(sym.qualified_name.clone());
+            }
+        } else if let Some(m) = modules.iter().find(|m| crate::rules::matches(m, &tok)) {
+            if !prov.modules.contains(m) {
+                prov.modules.push(m.clone());
+            }
+        }
+    }
+    prov
+}
+
+/// All backtick-quoted tokens in a line.
+fn backtick_tokens(line: &str) -> Vec<String> {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    let re = RE.get_or_init(|| Regex::new(r"`([^`]+)`").unwrap());
+    re.captures_iter(line).map(|c| c[1].to_string()).collect()
 }
 
 fn detail_for(verdict: Verdict) -> &'static str {
@@ -345,9 +420,51 @@ let in_fence = `ignored`;
 | col | `cell` |
 plain sentence without code tokens here at all
 ";
-        let claims = candidate_claims(md, "DOC.md");
+        let claims = candidate_claims(md, "DOC.md", &CodeIndex::default());
         let texts: Vec<&str> = claims.iter().map(|c| c.text.as_str()).collect();
         assert_eq!(texts, vec!["The cache invalidates on `write` and never on read."]);
         assert_eq!(claims[0].doc_ref, "DOC.md:2");
+    }
+
+    #[test]
+    fn decide_contradiction_must_win_and_clear_threshold() {
+        // Strong contradiction, weaker entailment -> contradicted.
+        assert_eq!(decide(0.3, 0.8, 0.5).0, Verdict::Contradicted);
+        // Strong entailment -> supported.
+        assert_eq!(decide(0.9, 0.2, 0.5).0, Verdict::Supported);
+        // Both below threshold -> unverifiable.
+        assert_eq!(decide(0.4, 0.45, 0.5).0, Verdict::Unverifiable);
+        // Entailment beats an above-threshold contradiction -> supported.
+        assert_eq!(decide(0.85, 0.6, 0.5).0, Verdict::Supported);
+    }
+
+    #[test]
+    fn ground_claim_prefers_symbol_then_module() {
+        use crate::code::symbol::{Facts, Span, Symbol, SymbolKind, Visibility};
+        let mut index = CodeIndex::default();
+        index.symbols.push(Symbol {
+            qualified_name: "src/cache::invalidate".into(),
+            name: "invalidate".into(),
+            kind: SymbolKind::Function,
+            visibility: Visibility::Public,
+            module: "src/cache".into(),
+            span: Span::zero(),
+            body_span: Span::zero(),
+            signature: None,
+            doc: None,
+            facts: Facts::default(),
+            calls: Vec::new(),
+            members: Vec::new(),
+        });
+        let modules = index.module_set();
+
+        // Symbol token grounds to the symbol; module token grounds to the module.
+        let prov = ground_claim("`invalidate` lives in `cache`", &index, &modules);
+        assert_eq!(prov.symbols, vec!["src/cache::invalidate"]);
+        assert_eq!(prov.modules, vec!["src/cache"]);
+
+        // A token matching nothing is ignored.
+        let prov = ground_claim("see `nonexistent_thing` here", &index, &modules);
+        assert!(prov.is_empty());
     }
 }
