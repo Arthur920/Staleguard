@@ -30,9 +30,26 @@ pub struct Manifests {
 }
 
 impl Manifests {
+    /// Load every manifest from `root` itself. Thin wrapper over
+    /// [`Manifests::load_nearest`]; kept for tests and single-dir callers.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn load(root: &Path) -> Manifests {
-        let npm = load_package_json(root);
-        let cargo_bins = load_cargo_bins(root);
+        Manifests::load_nearest(root, root)
+    }
+
+    /// Resolve each manifest from the *nearest* ancestor of `start` (up to and
+    /// including `root`) that declares it — so a `pydantic-core/README.md` is
+    /// checked against `pydantic-core/Makefile`, not just the repo-root one. Each
+    /// manifest type is located independently (the nearest `Makefile` and the
+    /// nearest `Cargo.toml` can sit in different directories). Without this, every
+    /// command in a sub-project's docs that hit a sibling manifest was a false
+    /// "target does not exist" finding.
+    pub fn load_nearest(start: &Path, root: &Path) -> Manifests {
+        let npm = find_up(start, root, &["package.json"]).and_then(|d| load_package_json(&d));
+        let cargo_bins =
+            find_up(start, root, &["Cargo.toml"]).and_then(|d| load_cargo_bins(&d));
+        let make_targets = find_up(start, root, &["Makefile", "makefile", "GNUmakefile"])
+            .and_then(|d| load_make_targets(&d));
 
         let mut project_bins = HashSet::new();
         if let Some((_, ref bins)) = npm {
@@ -44,7 +61,7 @@ impl Manifests {
 
         Manifests {
             npm_scripts: npm.map(|(scripts, _)| scripts),
-            make_targets: load_make_targets(root),
+            make_targets,
             cargo_bins,
             project_bins,
         }
@@ -54,6 +71,27 @@ impl Manifests {
     pub fn project_bins(&self) -> &HashSet<String> {
         &self.project_bins
     }
+}
+
+/// Walk up from `start` to `root` (inclusive) and return the first directory that
+/// contains any of `names`. `start` may be a file or a directory; the search
+/// begins at its containing directory.
+fn find_up(start: &Path, root: &Path, names: &[&str]) -> Option<std::path::PathBuf> {
+    let mut dir = if start.is_dir() {
+        Some(start)
+    } else {
+        start.parent()
+    };
+    while let Some(d) = dir {
+        if names.iter().any(|n| d.join(n).exists()) {
+            return Some(d.to_path_buf());
+        }
+        if d == root {
+            break;
+        }
+        dir = d.parent();
+    }
+    None
 }
 
 // ---- manifest parsing -----------------------------------------------------
@@ -409,6 +447,25 @@ mod tests {
             .collect();
         assert_eq!(flagged.len(), 1);
         assert!(flagged[0].contains("nope"));
+    }
+
+    #[test]
+    fn make_target_resolved_from_nearest_makefile() {
+        // A sub-project Makefile must be found from a doc inside that subtree,
+        // not just the repo root (which here has no Makefile at all).
+        let dir = scratch("nearest");
+        let sub = dir.join("subproj");
+        fs::create_dir_all(&sub).unwrap();
+        fs::write(sub.join("Makefile"), "build-dev:\n\tcargo build\n").unwrap();
+        let m = Manifests::load_nearest(&sub, &dir);
+        let md = "```sh\nmake build-dev\nmake ghost\n```";
+        let flagged: Vec<String> = check(md, "subproj/README.md", &m)
+            .iter()
+            .filter(|f| f.verdict.is_reportable())
+            .map(|f| f.detail.clone())
+            .collect();
+        assert_eq!(flagged.len(), 1);
+        assert!(flagged[0].contains("ghost"));
     }
 
     #[test]

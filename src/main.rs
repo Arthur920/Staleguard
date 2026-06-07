@@ -22,6 +22,7 @@ mod verify;
 
 use code::CodeIndex;
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
@@ -133,14 +134,51 @@ pub(crate) fn collect_docs(root: &Path) -> Vec<PathBuf> {
                 Some("md") | Some("markdown")
             )
         })
+        .filter(|p| !is_changelog_doc(p))
         .collect()
+}
+
+/// Changelogs and release-note fragments document *past* states, so they
+/// legitimately name removed files, old symbols, and external versions — verbatim
+/// history, not claims about the current code. Checking them only manufactures
+/// false drift, so they are excluded from the doc set.
+pub(crate) fn is_changelog_doc(path: &Path) -> bool {
+    let name = path
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    const NAMES: &[&str] = &[
+        "history.md",
+        "changelog.md",
+        "changelog.markdown",
+        "changes.md",
+        "news.md",
+        "releases.md",
+        "release-notes.md",
+        "release_notes.md",
+        "whatsnew.md",
+    ];
+    if NAMES.contains(&name.as_str()) {
+        return true;
+    }
+    // Towncrier-style fragment directories: `changes/`, `changelog.d/`, `news.d/`.
+    path.components().any(|c| {
+        matches!(
+            c.as_os_str().to_str().map(str::to_ascii_lowercase).as_deref(),
+            Some("changes") | Some("changelog.d") | Some("changelog") | Some("news.d") | Some("newsfragments")
+        )
+    })
 }
 
 fn run_check(root: &Path, opts: &drift::Options, layer: u8) -> drift::Outcome {
     let _ = layer; // consulted only in `ml` builds for the Layer 3 judge.
     // Repo-wide grounding, built once and shared across every doc.
     let index = CodeIndex::build(root);
-    let manifests = commands::Manifests::load(root);
+    // Manifests are resolved per doc from its nearest ancestor manifest (cached
+    // by directory), so a sub-project's docs check against that sub-project's
+    // Makefile/Cargo.toml/package.json rather than only the repo-root one.
+    let mut manifest_cache: HashMap<PathBuf, commands::Manifests> = HashMap::new();
     let code_tokens = config::code_tokens(root);
     let grounding = entrypoints::Grounding::from_index(&index);
     // One git-history fetch shared by every history-mining pass (coverage risk
@@ -166,9 +204,13 @@ fn run_check(root: &Path, opts: &drift::Options, layer: u8) -> drift::Outcome {
             .unwrap_or(&doc)
             .to_string_lossy()
             .to_string();
+        let doc_dir = doc.parent().unwrap_or(root).to_path_buf();
+        let manifests = manifest_cache
+            .entry(doc_dir.clone())
+            .or_insert_with(|| commands::Manifests::load_nearest(&doc_dir, root));
         let claims = extract::extract_path_claims(&text, &rel);
         findings.extend(verify::check_paths(&claims, root, &repo_files));
-        findings.extend(commands::check(&text, &rel, &manifests));
+        findings.extend(commands::check(&text, &rel, manifests));
         findings.extend(config::check(
             &text,
             &rel,
