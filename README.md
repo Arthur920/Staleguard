@@ -71,6 +71,11 @@ shlomes retrieve "where is auth handled" --k 5
 
 ## Performance & footprint
 
+- **Fast** — the deterministic Layer 1 scans a ~330k-line repo (1,363 source
+  files) in **~1.2s** for a full `check` (~0.7s warm) and **under a second**
+  for `index`, at ~100 MB peak memory. Per-file parsing runs in parallel
+  (rayon) and tree-sitter queries are compiled once and cached, so throughput
+  scales with cores.
 - **Local & offline** — the jina embedding model (~160 MB) and the NLI
   cross-encoder (`nli-deberta-v3-xsmall`, int8 ONNX ~20 MB) download once, then
   run on-device. Code never leaves the machine.
