@@ -13,6 +13,7 @@ pub mod symbol;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
+use rayon::prelude::*;
 use serde::Serialize;
 
 use extract::RawRef;
@@ -38,11 +39,19 @@ impl CodeIndex {
     /// Walk every code file under `repo_root` and extract symbols + edges, then
     /// resolve raw references into symbol-level reference edges across files.
     pub fn build(repo_root: &Path) -> CodeIndex {
+        // Parse files in parallel — each `extract_file` owns its tree-sitter
+        // parser, so there's no shared state. `collect` into an ordered Vec keeps
+        // the merge deterministic (stable symbol order = stable output).
+        let files = lang::code_files(repo_root);
+        let per_file: Vec<_> = files
+            .par_iter()
+            .map(|file| extract::extract_file(file, repo_root))
+            .collect();
+
         let mut symbols = Vec::new();
         let mut edges = Vec::new();
         let mut raw_refs = Vec::new();
-        for file in lang::code_files(repo_root) {
-            let (s, e, r) = extract::extract_file(&file, repo_root);
+        for (s, e, r) in per_file {
             symbols.extend(s);
             edges.extend(e);
             raw_refs.extend(r);

@@ -2,8 +2,10 @@
 //! code-file walker (hoisted here so the `ml` retrieval path reuses it).
 
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
 use tree_sitter::Language as TsLanguage;
+use tree_sitter::Query;
 use tree_sitter_tags::TagsConfiguration;
 use walkdir::{DirEntry, WalkDir};
 
@@ -113,6 +115,60 @@ impl Language {
             Language::Java => tree_sitter_java::TAGS_QUERY.to_string(),
         };
         TagsConfiguration::new(self.ts_language(), &query, "")
+    }
+
+    /// The compiled tag configuration, built once per language and reused across
+    /// every file. Compiling the (large) `TAGS_QUERY` per file was the dominant
+    /// cost of the index build; this caches it. `None` if the query fails to
+    /// compile. Thread-safe: the config is immutable once built.
+    pub fn tags_config_cached(self) -> Option<&'static TagsConfiguration> {
+        self.config_slot()
+            .get_or_init(|| self.tags_config().ok())
+            .as_ref()
+    }
+
+    /// The compiled import-edge query, built once per language and reused across
+    /// every file (same rationale as [`tags_config_cached`]).
+    pub fn import_query_compiled(self) -> Option<&'static Query> {
+        self.query_slot()
+            .get_or_init(|| Query::new(&self.ts_language(), self.import_query()).ok())
+            .as_ref()
+    }
+
+    /// Per-language storage slot for the cached tag config.
+    fn config_slot(self) -> &'static OnceLock<Option<TagsConfiguration>> {
+        static RUST: OnceLock<Option<TagsConfiguration>> = OnceLock::new();
+        static PYTHON: OnceLock<Option<TagsConfiguration>> = OnceLock::new();
+        static JS: OnceLock<Option<TagsConfiguration>> = OnceLock::new();
+        static TS: OnceLock<Option<TagsConfiguration>> = OnceLock::new();
+        static TSX: OnceLock<Option<TagsConfiguration>> = OnceLock::new();
+        static JAVA: OnceLock<Option<TagsConfiguration>> = OnceLock::new();
+        match self {
+            Language::Rust => &RUST,
+            Language::Python => &PYTHON,
+            Language::JavaScript => &JS,
+            Language::TypeScript => &TS,
+            Language::Tsx => &TSX,
+            Language::Java => &JAVA,
+        }
+    }
+
+    /// Per-language storage slot for the cached import query.
+    fn query_slot(self) -> &'static OnceLock<Option<Query>> {
+        static RUST: OnceLock<Option<Query>> = OnceLock::new();
+        static PYTHON: OnceLock<Option<Query>> = OnceLock::new();
+        static JS: OnceLock<Option<Query>> = OnceLock::new();
+        static TS: OnceLock<Option<Query>> = OnceLock::new();
+        static TSX: OnceLock<Option<Query>> = OnceLock::new();
+        static JAVA: OnceLock<Option<Query>> = OnceLock::new();
+        match self {
+            Language::Rust => &RUST,
+            Language::Python => &PYTHON,
+            Language::JavaScript => &JS,
+            Language::TypeScript => &TS,
+            Language::Tsx => &TSX,
+            Language::Java => &JAVA,
+        }
     }
 
     /// A tree-sitter query that captures imported module paths, for dep edges.

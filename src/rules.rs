@@ -15,6 +15,7 @@ use std::collections::HashSet;
 use std::path::Path;
 use std::sync::OnceLock;
 
+use rayon::prelude::*;
 use regex::Regex;
 
 use crate::claim::Provenance;
@@ -256,10 +257,10 @@ fn check_layer(
 /// permissions) are dropped — they can't be textually scanned anyway.
 fn read_sources(repo_root: &Path) -> Vec<(String, String)> {
     lang::code_files(repo_root)
-        .into_iter()
+        .par_iter()
         .filter_map(|file| {
-            let module = lang::module_path(&file, repo_root);
-            let text = std::fs::read_to_string(&file).ok()?;
+            let module = lang::module_path(file, repo_root);
+            let text = std::fs::read_to_string(file).ok()?;
             Some((module, text))
         })
         .collect()

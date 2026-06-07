@@ -16,6 +16,7 @@ use std::collections::HashSet;
 use std::path::Path;
 use std::sync::OnceLock;
 
+use rayon::prelude::*;
 use regex::Regex;
 
 use crate::claim::Provenance;
@@ -27,15 +28,21 @@ use crate::findings::{Finding, Verdict};
 /// env vars and flags. TOML/YAML are in `CODE_EXTS`, so `Cargo.toml` keys (e.g.
 /// `features`, `release`) ground the corresponding cargo flags.
 pub fn code_tokens(repo_root: &Path) -> HashSet<String> {
-    let mut tokens = HashSet::new();
-    for file in lang::code_files(repo_root) {
-        if let Ok(text) = std::fs::read_to_string(&file) {
-            for m in ident_re().find_iter(&text) {
-                tokens.insert(m.as_str().to_string());
+    lang::code_files(repo_root)
+        .par_iter()
+        .map(|file| {
+            let mut local = HashSet::new();
+            if let Ok(text) = std::fs::read_to_string(file) {
+                for m in ident_re().find_iter(&text) {
+                    local.insert(m.as_str().to_string());
+                }
             }
-        }
-    }
-    tokens
+            local
+        })
+        .reduce(HashSet::new, |mut a, b| {
+            a.extend(b);
+            a
+        })
 }
 
 /// Check env-var and flag claims in `markdown` against the source grounding set.

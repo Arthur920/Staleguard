@@ -6,7 +6,7 @@ use std::ops::Range;
 use std::path::Path;
 
 use streaming_iterator::StreamingIterator;
-use tree_sitter::{Parser, Query, QueryCursor};
+use tree_sitter::{Node, Parser, QueryCursor, Tree};
 use tree_sitter_tags::TagsContext;
 
 use crate::code::lang::{self, Language};
@@ -38,38 +38,44 @@ pub fn extract_file(path: &Path, repo_root: &Path) -> (Vec<Symbol>, Vec<DepEdge>
         .unwrap_or(path)
         .to_string_lossy()
         .to_string();
-    let (symbols, refs) = extract_symbols_and_refs(language, &source, &module, &rel);
-    let edges = extract_edges(language, &source, &module);
+    // Parse the file once; the AST is shared by fact extraction and the
+    // import-edge query. (tree-sitter-tags does its own internal parse for the
+    // tag scan, which it doesn't expose, so that one we can't fold in.)
+    let tree = parse_tree(language, &source);
+    let root = tree.as_ref().map(|t| t.root_node());
+    let (symbols, refs) = symbols_and_refs(language, &source, &module, &rel, root);
+    let edges = import_edges(language, &source, &module, root);
     (symbols, edges, refs)
 }
 
-fn extract_symbols_and_refs(
+/// Parse `source` into a syntax tree, or `None` if the language/parse fails.
+fn parse_tree(language: Language, source: &[u8]) -> Option<Tree> {
+    let mut parser = Parser::new();
+    parser.set_language(&language.ts_language()).ok()?;
+    parser.parse(source, None)
+}
+
+fn symbols_and_refs(
     language: Language,
     source: &[u8],
     module: &str,
     rel: &str,
+    root: Option<Node>,
 ) -> (Vec<Symbol>, Vec<RawRef>) {
-    let Ok(config) = language.tags_config() else {
+    let Some(config) = language.tags_config_cached() else {
         return (Vec::new(), Vec::new());
     };
     let mut ctx = TagsContext::new();
-    let Ok((tags, _)) = ctx.generate_tags(&config, source, None) else {
+    let Ok((tags, _)) = ctx.generate_tags(config, source, None) else {
         return (Vec::new(), Vec::new());
     };
 
     let text = String::from_utf8_lossy(source);
     let lines: Vec<&str> = text.lines().collect();
 
-    // Parse the file once so each definition can be walked for behavioral facts
-    // and its full body range located. Tags give byte ranges (`tag.range`) but
-    // not AST nodes; we resolve the node by byte range below.
-    let ts_lang = language.ts_language();
-    let mut parser = Parser::new();
-    let tree = parser
-        .set_language(&ts_lang)
-        .ok()
-        .and_then(|_| parser.parse(source, None));
-    let root = tree.as_ref().map(|t| t.root_node());
+    // The caller hands us the shared AST. Tags give byte ranges (`tag.range`)
+    // but not AST nodes; we resolve each definition's node by byte range below
+    // for behavioral facts and its full body span.
 
     let mut symbols = Vec::new();
     // (full byte range of a definition, its qualified_name) for the innermost-
@@ -275,21 +281,21 @@ fn enclosing(defs: &[(Range<usize>, String)], pos: usize) -> Option<&str> {
         .map(|(_, q)| q.as_str())
 }
 
-fn extract_edges(language: Language, source: &[u8], module: &str) -> Vec<DepEdge> {
-    let ts_lang = language.ts_language();
-    let Ok(query) = Query::new(&ts_lang, language.import_query()) else {
+fn import_edges(
+    language: Language,
+    source: &[u8],
+    module: &str,
+    root: Option<Node>,
+) -> Vec<DepEdge> {
+    let Some(query) = language.import_query_compiled() else {
         return Vec::new();
     };
-    let mut parser = Parser::new();
-    if parser.set_language(&ts_lang).is_err() {
-        return Vec::new();
-    }
-    let Some(tree) = parser.parse(source, None) else {
+    let Some(root) = root else {
         return Vec::new();
     };
 
     let mut cursor = QueryCursor::new();
-    let mut matches = cursor.matches(&query, tree.root_node(), source);
+    let mut matches = cursor.matches(query, root, source);
     let mut edges = Vec::new();
     while let Some(m) = matches.next() {
         for cap in m.captures {
@@ -362,6 +368,26 @@ fn normalize_import(raw: &str) -> String {
     raw.trim()
         .trim_matches(|c| c == '"' || c == '\'' || c == '`')
         .to_string()
+}
+
+/// Test-only convenience wrappers that parse internally, so the unit tests can
+/// drive the workers from a raw source string. Production code parses once in
+/// [`extract_file`] and shares the tree.
+#[cfg(test)]
+fn extract_symbols_and_refs(
+    language: Language,
+    source: &[u8],
+    module: &str,
+    rel: &str,
+) -> (Vec<Symbol>, Vec<RawRef>) {
+    let tree = parse_tree(language, source);
+    symbols_and_refs(language, source, module, rel, tree.as_ref().map(|t| t.root_node()))
+}
+
+#[cfg(test)]
+fn extract_edges(language: Language, source: &[u8], module: &str) -> Vec<DepEdge> {
+    let tree = parse_tree(language, source);
+    import_edges(language, source, module, tree.as_ref().map(|t| t.root_node()))
 }
 
 #[cfg(test)]

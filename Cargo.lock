@@ -2345,6 +2345,7 @@ dependencies = [
  "fastembed",
  "hf-hub",
  "ort",
+ "rayon",
  "regex",
  "serde",
  "serde_json",
