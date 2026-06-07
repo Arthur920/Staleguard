@@ -1,5 +1,12 @@
 //! Layer 3 verification: an NLI cross-encoder as the coherence judge.
 //!
+//! **Status: EXPERIMENTAL — not reliable for verdicts.** The judge is a *text*-NLI
+//! model (`nli-deberta-v3-xsmall`, trained on MNLI/SNLI) but the premise is *raw
+//! code*, which is out-of-distribution: it emits overconfident (0.90–1.00) false
+//! contradictions on genuine claims. The claim-extraction and decision logic here
+//! are sound (and isolate the failure to the model); the fix is a code-aware NLI
+//! head — drop it in via `SHLOMES_NLI_REPO` once trained. Until then ship Layer 1.
+//!
 //! For doc claims that survive the deterministic layers (behavioural prose like
 //! "the cache invalidates on write"), Layer 2 retrieves the most relevant code
 //! chunks and this layer renders the verdict. The judge is a natural-language
@@ -41,6 +48,11 @@ use crate::retrieve;
 const DEFAULT_REPO: &str = "Xenova/nli-deberta-v3-xsmall";
 const DEFAULT_ONNX: &str = "onnx/model_quantized.onnx";
 const DEFAULT_THRESHOLD: f32 = 0.5;
+/// How far contradiction must out-score entailment *within a single evidence
+/// chunk* before that chunk counts as contradicting. Guards against the OOD
+/// failure mode where a text-NLI model, fed code it never trained on, scatters
+/// near-equal mass onto contradiction and entailment. Override: `SHLOMES_NLI_MARGIN`.
+const DEFAULT_MARGIN: f32 = 0.15;
 const MAX_TOKENS: usize = 256;
 
 /// Top-k code chunks retrieved per claim and fed to the judge as evidence.
@@ -105,6 +117,7 @@ pub struct Judge {
     /// Some DeBERTa ONNX exports omit `token_type_ids`; only pass it if declared.
     needs_token_types: bool,
     threshold: f32,
+    margin: f32,
 }
 
 impl Judge {
@@ -116,6 +129,10 @@ impl Judge {
             .ok()
             .and_then(|s| s.parse().ok())
             .unwrap_or(DEFAULT_THRESHOLD);
+        let margin = std::env::var("SHLOMES_NLI_MARGIN")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(DEFAULT_MARGIN);
 
         let repo = Api::new()?.model(repo_name);
         let onnx = repo.get(&onnx_rel)?;
@@ -148,6 +165,7 @@ impl Judge {
             labels,
             needs_token_types,
             threshold,
+            margin,
         })
     }
 
@@ -210,28 +228,39 @@ impl Judge {
         Ok(out)
     }
 
-    /// Judge a claim against its retrieved evidence in one batched pass.
-    /// Max-pools entailment and contradiction across the chunks, then
-    /// [`decide`]s. Returns the verdict and the confidence behind it.
+    /// Judge a claim against its retrieved evidence in one batched pass: classify
+    /// every `(evidence, claim)` pair, then [`decide`] over the per-chunk scores.
+    /// Returns the verdict and the confidence behind it.
     pub fn judge(&mut self, claim: &str, evidence: &[String]) -> Result<(Verdict, f32)> {
         if evidence.is_empty() {
             return Ok((Verdict::Unverifiable, 0.0));
         }
         let pairs: Vec<(&str, &str)> = evidence.iter().map(|ev| (ev.as_str(), claim)).collect();
-        let (mut best_entail, mut best_contra) = (0.0f32, 0.0f32);
-        for [contra, entail, _neutral] in self.classify_batch(&pairs)? {
-            best_entail = best_entail.max(entail);
-            best_contra = best_contra.max(contra);
-        }
-        Ok(decide(best_entail, best_contra, self.threshold))
+        let scores = self.classify_batch(&pairs)?;
+        Ok(decide(&scores, self.threshold, self.margin))
     }
 }
 
-/// The verdict rule (pure, model-free, unit-tested). Contradiction is the
-/// differentiating signal, so it must clear the threshold *and* out-weigh
-/// entailment before we flag drift; otherwise a strong entailment supports the
-/// claim, and anything weaker is `unverifiable`.
-fn decide(best_entail: f32, best_contra: f32, threshold: f32) -> (Verdict, f32) {
+/// The verdict rule (pure, model-free, unit-tested), over per-chunk
+/// `[contra, entail, neutral]` probabilities.
+///
+/// Entailment is pooled as a plain max — any chunk that clearly entails supports
+/// the claim. Contradiction is the differentiating signal but also the OOD
+/// failure mode (a text-NLI model fed code dumps near-equal mass onto contra and
+/// entail), so a chunk only *counts* as contradicting when contradiction is the
+/// dominant class **within that chunk**: it beats entailment by `margin` and at
+/// least matches neutral. Naively max-pooling contradiction across chunks let one
+/// noisy chunk fire a false verdict even when that same chunk was, on balance,
+/// more entailing than contradicting. A qualifying contradiction then still has
+/// to clear `threshold` and out-weigh the best entailment before we flag drift.
+fn decide(scores: &[[f32; 3]], threshold: f32, margin: f32) -> (Verdict, f32) {
+    let best_entail = scores.iter().map(|s| s[1]).fold(0.0_f32, f32::max);
+    let best_contra = scores
+        .iter()
+        .filter(|s| s[0] >= s[1] + margin && s[0] >= s[2])
+        .map(|s| s[0])
+        .fold(0.0_f32, f32::max);
+
     if best_contra >= threshold && best_contra >= best_entail {
         (Verdict::Contradicted, best_contra)
     } else if best_entail >= threshold {
@@ -250,28 +279,53 @@ pub fn check(root: &Path, index: &CodeIndex, claims: &[ProseClaim], k: usize) ->
         return Ok(Vec::new());
     }
 
-    let texts: Vec<String> = claims.iter().map(|c| c.text.clone()).collect();
+    // Evidence selection. Default: Layer-1 grounding + a model-free lexical
+    // fallback ([`crate::evidence`]) — no corpus embedding. `SHLOMES_EMBED_RETRIEVE`
+    // restores the embedding retriever. Each entry is (text, path, start_line).
     let t = std::time::Instant::now();
-    let retrieved = retrieve::retrieve(root, index, &texts, k)?;
-    timing(format!("retrieve ({} claims)", claims.len()), t);
+    let per_claim: Vec<Vec<(String, String, usize)>> =
+        if std::env::var_os("SHLOMES_EMBED_RETRIEVE").is_some() {
+            let texts: Vec<String> = claims.iter().map(|c| c.text.clone()).collect();
+            retrieve::retrieve(root, index, &texts, k)?
+                .into_iter()
+                .map(|hits| {
+                    hits.into_iter()
+                        .map(|h| (h.text, h.path, h.start_line))
+                        .collect()
+                })
+                .collect()
+        } else {
+            let lexicon = crate::evidence::Lexicon::build(index);
+            let mut files = crate::evidence::FileCache::new();
+            claims
+                .iter()
+                .map(|c| {
+                    crate::evidence::gather(&c.text, &c.provenance, index, &lexicon, root, k, &mut files)
+                        .into_iter()
+                        .map(|e| (e.text, e.path, e.start_line))
+                        .collect()
+                })
+                .collect()
+        };
+    timing(format!("evidence ({} claims)", claims.len()), t);
     let t = std::time::Instant::now();
     let mut judge = Judge::load()?;
     timing("judge model load", t);
 
     let t = std::time::Instant::now();
     let mut findings = Vec::new();
-    for (claim, hits) in claims.iter().zip(retrieved) {
-        let evidence: Vec<String> = hits.iter().map(|h| h.text.clone()).collect();
-        let refs: Vec<String> = hits
+    for (claim, ev) in claims.iter().zip(per_claim) {
+        let evidence: Vec<String> = ev.iter().map(|(text, _, _)| text.clone()).collect();
+        let refs: Vec<String> = ev
             .iter()
-            .map(|h| format!("{}:{}", h.path, h.start_line))
+            .map(|(_, path, line)| format!("{path}:{line}"))
             .collect();
         // Prefer the claim's own grounding (symbols/modules — survives moves and
         // feeds the fingerprint flag); fall back to the evidence files only when
         // the claim grounded to nothing.
         let prov = if claim.provenance.is_empty() {
             Provenance {
-                paths: hits.iter().map(|h| h.path.clone()).collect(),
+                paths: ev.iter().map(|(_, path, _)| path.clone()).collect(),
                 ..Default::default()
             }
         } else {
@@ -304,42 +358,162 @@ pub(crate) fn timing(label: impl AsRef<str>, since: std::time::Instant) {
     }
 }
 
-/// Pull candidate behavioural claims from doc prose: lines that reference code
-/// (an inline backtick span) and read like a sentence. Each claim's backtick
-/// tokens are grounded to the code index. Deliberately heuristic — the NLI judge
-/// is the filter, and the confidence threshold keeps weak verdicts out of the
-/// report. Skips fenced code, headings, and table rows.
+/// Pull candidate behavioural claims from doc prose: complete sentences/bullets
+/// that reference code (an inline backtick span) and read like an assertion. Each
+/// claim's backtick tokens are grounded to the code index. Deliberately heuristic
+/// — the NLI judge is the filter — but the NLI model is text-trained and brittle,
+/// so we only hand it *propositions*: soft-wrapped lines are reassembled into one
+/// logical claim (so it isn't judged as a truncated fragment), and sentence
+/// fragments and quoted illustrative examples are dropped. Skips fenced code,
+/// headings, and table rows.
 pub fn candidate_claims(text: &str, doc_path: &str, index: &CodeIndex) -> Vec<ProseClaim> {
     let modules = index.module_set();
     let mut out = Vec::new();
-    let mut in_fence = false;
-    for (i, raw) in text.lines().enumerate() {
-        let line = raw.trim();
-        if line.starts_with("```") || line.starts_with("~~~") {
-            in_fence = !in_fence;
-            continue;
-        }
-        if in_fence || line.is_empty() || line.starts_with('#') || line.starts_with('|') {
-            continue;
-        }
-        if !line.contains('`') {
-            continue;
-        }
-        let cleaned = line
+    for (start, block) in logical_lines(text) {
+        let cleaned = block
             .trim_start_matches(['-', '*', '>', ' ', '\t'])
             .trim()
             .to_string();
-        if cleaned.split_whitespace().count() < 6 {
+        if cleaned.split_whitespace().count() < 6 || !cleaned.contains('`') {
+            continue;
+        }
+        // The NLI judge can only rule on a complete proposition. Drop the shapes
+        // that aren't one: mid-clause fragments (soft-wrap / list continuations),
+        // quoted examples of some other rule, `**Bold** — gloss` feature entries,
+        // and lowercase-leading list continuations. All skew to false verdicts.
+        if is_fragment(&cleaned)
+            || is_quoted_example(&cleaned)
+            || is_feature_entry(&cleaned)
+            || starts_lowercase(&cleaned)
+        {
             continue;
         }
         let provenance = ground_claim(&cleaned, index, &modules);
         out.push(ProseClaim {
             text: cleaned,
-            doc_ref: format!("{doc_path}:{}", i + 1),
+            doc_ref: format!("{doc_path}:{}", start + 1),
             provenance,
         });
     }
     out
+}
+
+/// Collapse markdown prose into logical lines for claim extraction: each list
+/// item or paragraph becomes one `(start_line, joined_text)`, with soft-wrapped
+/// continuation lines folded in. Fenced code, blank lines, headings, and table
+/// rows act as separators (and are never emitted). `start_line` is 0-based.
+fn logical_lines(text: &str) -> Vec<(usize, String)> {
+    let mut blocks: Vec<(usize, String)> = Vec::new();
+    let mut cur: Option<(usize, String)> = None;
+    let mut in_fence = false;
+    for (i, raw) in text.lines().enumerate() {
+        let line = raw.trim();
+        if line.starts_with("```") || line.starts_with("~~~") {
+            in_fence = !in_fence;
+            if let Some(b) = cur.take() {
+                blocks.push(b);
+            }
+            continue;
+        }
+        if in_fence {
+            continue;
+        }
+        // Separators close the current block without starting a new one.
+        if line.is_empty() || line.starts_with('#') || line.starts_with('|') {
+            if let Some(b) = cur.take() {
+                blocks.push(b);
+            }
+            continue;
+        }
+        let starts_item = line.starts_with('-')
+            || line.starts_with('*')
+            || line.starts_with('>')
+            || is_numbered_item(line);
+        if starts_item {
+            if let Some(b) = cur.take() {
+                blocks.push(b);
+            }
+            cur = Some((i, line.to_string()));
+        } else if let Some((_, buf)) = cur.as_mut() {
+            // Soft-wrapped continuation of the current paragraph/item.
+            buf.push(' ');
+            buf.push_str(line);
+        } else {
+            cur = Some((i, line.to_string()));
+        }
+    }
+    if let Some(b) = cur {
+        blocks.push(b);
+    }
+    blocks
+}
+
+/// A markdown ordered-list marker: `1.` / `2)` etc. at the start of the line.
+fn is_numbered_item(line: &str) -> bool {
+    let digits: String = line.chars().take_while(|c| c.is_ascii_digit()).collect();
+    !digits.is_empty()
+        && line[digits.len()..]
+            .starts_with(['.', ')'])
+}
+
+/// True when the line ends mid-clause — a trailing comma/semicolon or a dangling
+/// conjunction/preposition/article — i.e. it is a fragment, not a full assertion.
+fn is_fragment(s: &str) -> bool {
+    let trimmed = s.trim_end_matches(|c: char| c.is_whitespace());
+    if trimmed.ends_with(',') || trimmed.ends_with(';') || trimmed.ends_with(':') {
+        return true;
+    }
+    let last = trimmed
+        .rsplit(char::is_whitespace)
+        .next()
+        .unwrap_or("")
+        .trim_matches(|c: char| !c.is_alphanumeric())
+        .to_ascii_lowercase();
+    DANGLING.contains(&last.as_str())
+}
+
+/// Words that, ending a line, mean the sentence was cut off.
+const DANGLING: &[&str] = &[
+    "and", "or", "but", "with", "that", "which", "the", "a", "an", "of", "to", "for", "in", "on",
+    "at", "by", "from", "as", "into", "than", "then", "if", "when", "where", "while", "via",
+];
+
+/// A definition/feature-list entry: a `**bold lead-in**` immediately followed by
+/// an em/en-dash gloss (`Local & offline** — the model runs locally`). These
+/// describe a feature; they are not checkable propositions about specific code.
+/// (The leading `**` is already stripped as a list marker, so we match the close.)
+fn is_feature_entry(s: &str) -> bool {
+    ["** —", "**—", "** –", "**–"].iter().any(|sep| s.contains(sep))
+}
+
+/// A claim that opens with a lowercase letter is a list continuation or sentence
+/// fragment — a real assertion opens with a capital or a code span. Leading
+/// emphasis markers are unwrapped first; a leading backtick code span is kept.
+fn starts_lowercase(s: &str) -> bool {
+    let t = s.trim_start_matches(['*', '_', ' ']);
+    matches!(t.chars().next(), Some(c) if c.is_ascii_lowercase())
+}
+
+/// True when the line's code spans live inside a double-quoted illustrative
+/// example (e.g. a rule shown by example: `"`controllers` must not import `db`"`),
+/// which asserts nothing about *this* codebase.
+fn is_quoted_example(s: &str) -> bool {
+    let mut in_quote = false;
+    let mut quoted_backtick = false;
+    for c in s.chars() {
+        match c {
+            '"' => {
+                if in_quote && quoted_backtick {
+                    return true;
+                }
+                in_quote = !in_quote;
+                quoted_backtick = false;
+            }
+            '`' if in_quote => quoted_backtick = true,
+            _ => {}
+        }
+    }
+    false
 }
 
 /// Ground a claim's backtick tokens to code: each token that names an indexed
@@ -443,15 +617,90 @@ plain sentence without code tokens here at all
     }
 
     #[test]
+    fn candidate_claims_reassembles_soft_wrapped_lines() {
+        // A soft-wrapped bullet must be judged as one whole proposition, not as a
+        // truncated fragment ending in "and".
+        let md = "\
+- The `judge` reads the resolved symbol body as the premise and
+  classifies the `claim` against it, emitting one verdict.
+";
+        let claims = candidate_claims(md, "DOC.md", &CodeIndex::default());
+        assert_eq!(claims.len(), 1);
+        assert_eq!(
+            claims[0].text,
+            "The `judge` reads the resolved symbol body as the premise and classifies the `claim` against it, emitting one verdict."
+        );
+        assert_eq!(claims[0].doc_ref, "DOC.md:1");
+    }
+
+    #[test]
+    fn candidate_claims_drops_fragments_and_examples() {
+        // A genuinely truncated fragment (no continuation to fold in) and a quoted
+        // illustrative rule are both dropped; the real assertion survives.
+        let md = "\
+commands (`npm run`, `make`, `cargo --bin`) with no matching script, target,
+
+forbidden imports — \"`controllers` must not import `db`\"
+
+The `check` command resolves `Manifests` from the nearest ancestor directory.
+";
+        let claims = candidate_claims(md, "DOC.md", &CodeIndex::default());
+        let texts: Vec<&str> = claims.iter().map(|c| c.text.as_str()).collect();
+        assert_eq!(
+            texts,
+            vec!["The `check` command resolves `Manifests` from the nearest ancestor directory."]
+        );
+    }
+
+    #[test]
+    fn candidate_claims_drops_feature_entries_and_continuations() {
+        // A `**Bold** — gloss` feature entry and a lowercase list continuation are
+        // not propositions; a capital- or code-led assertion survives.
+        let md = "\
+- Local & offline** — the `judge` and embedder run on the machine, no API calls.
+- commands (`npm run`, `make`) with no matching script or target are flagged.
+- `--diff <ref>` re-checks only what changed since a git ref in the working tree.
+- The `check` command grounds each `claim` to an indexed symbol before judging.
+";
+        let claims = candidate_claims(md, "DOC.md", &CodeIndex::default());
+        let texts: Vec<&str> = claims.iter().map(|c| c.text.as_str()).collect();
+        assert_eq!(
+            texts,
+            vec![
+                "`--diff <ref>` re-checks only what changed since a git ref in the working tree.",
+                "The `check` command grounds each `claim` to an indexed symbol before judging.",
+            ]
+        );
+    }
+
+    #[test]
     fn decide_contradiction_must_win_and_clear_threshold() {
-        // Strong contradiction, weaker entailment -> contradicted.
-        assert_eq!(decide(0.3, 0.8, 0.5).0, Verdict::Contradicted);
+        // chunk = [contra, entail, neutral]; default margin 0.15.
+        let m = 0.15;
+        // Strong, dominant contradiction -> contradicted.
+        assert_eq!(decide(&[[0.8, 0.3, 0.0]], 0.5, m).0, Verdict::Contradicted);
         // Strong entailment -> supported.
-        assert_eq!(decide(0.9, 0.2, 0.5).0, Verdict::Supported);
+        assert_eq!(decide(&[[0.2, 0.9, 0.0]], 0.5, m).0, Verdict::Supported);
         // Both below threshold -> unverifiable.
-        assert_eq!(decide(0.4, 0.45, 0.5).0, Verdict::Unverifiable);
-        // Entailment beats an above-threshold contradiction -> supported.
-        assert_eq!(decide(0.85, 0.6, 0.5).0, Verdict::Supported);
+        assert_eq!(decide(&[[0.45, 0.4, 0.15]], 0.5, m).0, Verdict::Unverifiable);
+        // Entailment dominates the chunk -> supported (contra filtered by margin).
+        assert_eq!(decide(&[[0.6, 0.85, 0.0]], 0.5, m).0, Verdict::Supported);
+    }
+
+    #[test]
+    fn decide_requires_per_chunk_dominance() {
+        let m = 0.15;
+        // One chunk entails strongly; another has high contra but its own entail
+        // is within the margin, so it does NOT count -> supported, not contradicted.
+        let scores = [[0.1, 0.9, 0.0], [0.6, 0.55, 0.0]];
+        assert_eq!(decide(&scores, 0.5, m).0, Verdict::Supported);
+
+        // A chunk where contra clears threshold AND dominates by margin -> contradicted.
+        let scores = [[0.2, 0.7, 0.1], [0.78, 0.5, 0.0]];
+        assert_eq!(decide(&scores, 0.5, m).0, Verdict::Contradicted);
+
+        // No evidence-equivalent: empty -> unverifiable, zero confidence.
+        assert_eq!(decide(&[], 0.5, m), (Verdict::Unverifiable, 0.0));
     }
 
     #[test]

@@ -12,6 +12,8 @@ mod extract;
 mod findings;
 mod git;
 #[cfg(feature = "ml")]
+mod evidence;
+#[cfg(feature = "ml")]
 mod judge;
 #[cfg(feature = "ml")]
 mod rerank;
@@ -66,8 +68,10 @@ enum Commands {
         /// Output format.
         #[arg(long, value_enum, default_value_t = Format::Text)]
         format: Format,
-        /// Max layer: 1 deterministic, 2 +retrieval, 3 +NLI judge (2-3 require
-        /// the `ml` feature build).
+        /// Max layer: 1 deterministic (recommended), 2 +retrieval, 3 +NLI judge.
+        /// Layers 2-3 require the `ml` feature build. Layer 3 is EXPERIMENTAL: the
+        /// NLI judge is a text model reading code (out-of-distribution) and emits
+        /// overconfident false contradictions — not yet reliable for verdicts.
         #[arg(long, default_value_t = 1)]
         layer: u8,
         /// Drift base: only re-derive claims whose code changed since this git
@@ -280,6 +284,11 @@ fn run_check(root: &Path, opts: &drift::Options, layer: u8, doc_filter: &[String
     // the deterministic findings rather than aborting the run.
     #[cfg(feature = "ml")]
     if layer >= 3 {
+        eprintln!(
+            "note: layer 3 (NLI judge) is EXPERIMENTAL — the text-NLI model reads code \
+             out-of-distribution and produces overconfident false contradictions; \
+             treat verdicts as advisory, not authoritative."
+        );
         let mut claims = Vec::new();
         for doc in collect_docs_filtered(root, doc_filter) {
             if let Ok(text) = std::fs::read_to_string(&doc) {
