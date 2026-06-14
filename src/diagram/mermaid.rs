@@ -52,7 +52,10 @@ pub(super) fn parse(body: &str, origin: &str) -> Option<Diagram> {
 
     for stmt in remaining.split(['\n', ';']) {
         let stmt = stmt.trim();
-        if stmt.is_empty() || stmt.starts_with("%%") || stmt.starts_with("subgraph") || stmt == "end"
+        if stmt.is_empty()
+            || stmt.starts_with("%%")
+            || stmt.starts_with("subgraph")
+            || stmt == "end"
         {
             continue;
         }
@@ -112,7 +115,10 @@ fn parse_chain<F: FnMut(&str, Option<&str>)>(
     }
     let mut left = leading_id(&stripped[..arrows[0].start()]);
     for (k, arr) in arrows.iter().enumerate() {
-        let next_start = arrows.get(k + 1).map(|a| a.start()).unwrap_or(stripped.len());
+        let next_start = arrows
+            .get(k + 1)
+            .map(|a| a.start())
+            .unwrap_or(stripped.len());
         let segment = &stripped[arr.end()..next_start];
         let right = leading_id(segment);
         if let (Some(l), Some(r)) = (left.as_deref(), right.as_deref()) {
@@ -153,7 +159,8 @@ fn node_decl_re() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
         // id followed by a bracketed label: `A[..]`, `A(..)`, `A{..}`.
-        Regex::new(r"([A-Za-z_][\w-]*)\s*(?:\[+|\(+|\{+)\s*([^\]\)\}]+?)\s*(?:\]+|\)+|\}+)").unwrap()
+        Regex::new(r"([A-Za-z_][\w-]*)\s*(?:\[+|\(+|\{+)\s*([^\]\)\}]+?)\s*(?:\]+|\)+|\}+)")
+            .unwrap()
     })
 }
 

@@ -180,12 +180,22 @@ fn include_tests() -> bool {
 /// across the common ecosystems (pytest, go, rust, js).
 fn is_non_library(rel: &str) -> bool {
     let lower = rel.to_ascii_lowercase();
-    let seg = |s: &str| {
-        lower.starts_with(&format!("{s}/")) || lower.contains(&format!("/{s}/"))
-    };
-    if ["tests", "test", "testing", "benchmarks", "benchmark", "bench", "examples", "example", "e2e", "fixtures", "__tests__"]
-        .iter()
-        .any(|d| seg(d))
+    let seg = |s: &str| lower.starts_with(&format!("{s}/")) || lower.contains(&format!("/{s}/"));
+    if [
+        "tests",
+        "test",
+        "testing",
+        "benchmarks",
+        "benchmark",
+        "bench",
+        "examples",
+        "example",
+        "e2e",
+        "fixtures",
+        "__tests__",
+    ]
+    .iter()
+    .any(|d| seg(d))
     {
         return true;
     }
@@ -394,7 +404,11 @@ pub fn retrieve(
     let mut reranker = crate::rerank::Reranker::from_env()?;
     // Over-fetch before reranking so the reranker can promote chunks cosine ranked
     // just outside the top-k.
-    let fetch = if reranker.is_some() { (k * 4).max(k) } else { k };
+    let fetch = if reranker.is_some() {
+        (k * 4).max(k)
+    } else {
+        k
+    };
 
     let mut results = Vec::with_capacity(queries.len());
     for (qi, qv) in query_vecs.iter().enumerate() {
@@ -422,7 +436,11 @@ pub fn retrieve(
             for (h, s) in hits.iter_mut().zip(scores) {
                 h.score = s;
             }
-            hits.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+            hits.sort_by(|a, b| {
+                b.score
+                    .partial_cmp(&a.score)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
         }
         hits.truncate(k);
         results.push(hits);
@@ -474,7 +492,7 @@ mod tests {
         for p in [
             "src/main.rs",
             "pydantic/main.py",
-            "lib/contest.py", // 'contest' must not match 'conftest'
+            "lib/contest.py",    // 'contest' must not match 'conftest'
             "src/latest/mod.rs", // 'latest' must not match the 'test' segment
         ] {
             assert!(!is_non_library(p), "should be library: {p}");

@@ -118,9 +118,23 @@ fn parse_body(body: &str, origin: &str) -> Option<Sequence> {
 /// Control-flow / styling lines that are not participants or messages.
 fn is_noise(line: &str) -> bool {
     const KW: &[&str] = &[
-        "note", "alt", "else", "opt", "loop", "par", "and", "end", "rect",
-        "activate", "deactivate", "autonumber", "title", "@start", "@end",
-        "skinparam", "box",
+        "note",
+        "alt",
+        "else",
+        "opt",
+        "loop",
+        "par",
+        "and",
+        "end",
+        "rect",
+        "activate",
+        "deactivate",
+        "autonumber",
+        "title",
+        "@start",
+        "@end",
+        "skinparam",
+        "box",
     ];
     line.starts_with('\'')
         || line.starts_with("%%")
@@ -139,7 +153,8 @@ fn participant_re() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
         // `participant <name|"name"> [as <alias>]` / `actor <name>`.
-        Regex::new(r#"^(?:participant|actor)\s+("?[^"\n]+?"?)(?:\s+as\s+([A-Za-z_]\w*))?$"#).unwrap()
+        Regex::new(r#"^(?:participant|actor)\s+("?[^"\n]+?"?)(?:\s+as\s+([A-Za-z_]\w*))?$"#)
+            .unwrap()
     })
 }
 

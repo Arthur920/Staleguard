@@ -111,10 +111,7 @@ mod tests {
             claim_id("a.md", "runs   `npm run build`  ")
         );
         // doc_path participates in identity.
-        assert_ne!(
-            claim_id("a.md", "runs `x`"),
-            claim_id("b.md", "runs `x`")
-        );
+        assert_ne!(claim_id("a.md", "runs `x`"), claim_id("b.md", "runs `x`"));
     }
 
     #[test]

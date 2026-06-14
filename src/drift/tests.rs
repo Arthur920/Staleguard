@@ -80,7 +80,11 @@ fn run_writes_ledger_and_score_and_treats_all_dirty_without_git() {
     assert!(dir.join(".shlomes/score.json").exists());
     let reloaded = Score::load(&dir).unwrap();
     // supported credit 1 / (1 + stale 2) = 1/3.
-    assert!((reloaded.repo - (1.0 / 3.0)).abs() < 1e-9, "{}", reloaded.repo);
+    assert!(
+        (reloaded.repo - (1.0 / 3.0)).abs() < 1e-9,
+        "{}",
+        reloaded.repo
+    );
 }
 
 #[test]
@@ -110,7 +114,10 @@ fn path_claims_bucket_to_their_module_or_path() {
         ..Default::default()
     };
     // A code-file path resolves to its module, even when named by suffix only.
-    assert_eq!(claim_modules(&Provenance::path("foo.rs"), &index), vec!["src/foo"]);
+    assert_eq!(
+        claim_modules(&Provenance::path("foo.rs"), &index),
+        vec!["src/foo"]
+    );
     assert_eq!(
         claim_modules(&Provenance::path("src/foo.rs"), &index),
         vec!["src/foo"]
@@ -186,8 +193,7 @@ fn behavioral_drift_flag_fires_when_ledger_hash_is_stale() {
     assert!(
         out.findings
             .iter()
-            .any(|x| x.verdict == Verdict::Unverifiable
-                && x.detail.contains("Behavioral drift")),
+            .any(|x| x.verdict == Verdict::Unverifiable && x.detail.contains("Behavioral drift")),
         "{:?}",
         out.findings
     );

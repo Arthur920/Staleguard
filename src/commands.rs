@@ -46,8 +46,7 @@ impl Manifests {
     /// "target does not exist" finding.
     pub fn load_nearest(start: &Path, root: &Path) -> Manifests {
         let npm = find_up(start, root, &["package.json"]).and_then(|d| load_package_json(&d));
-        let cargo_bins =
-            find_up(start, root, &["Cargo.toml"]).and_then(|d| load_cargo_bins(&d));
+        let cargo_bins = find_up(start, root, &["Cargo.toml"]).and_then(|d| load_cargo_bins(&d));
         let make_targets = find_up(start, root, &["Makefile", "makefile", "GNUmakefile"])
             .and_then(|d| load_make_targets(&d));
 
@@ -437,7 +436,11 @@ mod tests {
     #[test]
     fn make_target_checked_against_makefile() {
         let dir = scratch("make");
-        fs::write(dir.join("Makefile"), "build:\n\tcargo build\n.PHONY: build test\n").unwrap();
+        fs::write(
+            dir.join("Makefile"),
+            "build:\n\tcargo build\n.PHONY: build test\n",
+        )
+        .unwrap();
         let m = Manifests::load(&dir);
         let md = "```sh\nmake build\nmake test\nmake nope\n```";
         let flagged: Vec<String> = check(md, "README.md", &m)
@@ -509,11 +512,12 @@ mod tests {
         .unwrap();
         let m = Manifests::load(&dir);
         // `yarn add` is a builtin (skip); `yarn lint` is an undefined script.
-        let flagged: Vec<String> = check("`yarn add foo` `yarn build` `yarn lint`", "README.md", &m)
-            .iter()
-            .filter(|f| f.verdict.is_reportable())
-            .map(|f| f.detail.clone())
-            .collect();
+        let flagged: Vec<String> =
+            check("`yarn add foo` `yarn build` `yarn lint`", "README.md", &m)
+                .iter()
+                .filter(|f| f.verdict.is_reportable())
+                .map(|f| f.detail.clone())
+                .collect();
         assert_eq!(flagged.len(), 1);
         assert!(flagged[0].contains("lint"));
     }

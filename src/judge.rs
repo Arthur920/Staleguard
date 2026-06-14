@@ -99,7 +99,9 @@ impl Labels {
             .ok_or_else(|| anyhow!("model config.json has no id2label map"))?;
         let (mut entail, mut contra, mut neutral) = (None, None, None);
         for (idx, label) in map {
-            let i: usize = idx.parse().map_err(|_| anyhow!("non-numeric label id {idx}"))?;
+            let i: usize = idx
+                .parse()
+                .map_err(|_| anyhow!("non-numeric label id {idx}"))?;
             let name = label.as_str().unwrap_or_default().to_ascii_lowercase();
             if name.contains("entail") {
                 entail = Some(i);
@@ -115,7 +117,9 @@ impl Labels {
                 contra,
                 neutral,
             }),
-            _ => Err(anyhow!("id2label is not a 3-class NLI head (need entailment/contradiction/neutral)")),
+            _ => Err(anyhow!(
+                "id2label is not a 3-class NLI head (need entailment/contradiction/neutral)"
+            )),
         }
     }
 }
@@ -168,7 +172,10 @@ impl Judge {
 
         let cfg: Json = serde_json::from_slice(&std::fs::read(cfg)?)?;
         let labels = Labels::from_config(&cfg)?;
-        let needs_token_types = session.inputs().iter().any(|i| i.name() == "token_type_ids");
+        let needs_token_types = session
+            .inputs()
+            .iter()
+            .any(|i| i.name() == "token_type_ids");
 
         Ok(Judge {
             session,
@@ -195,7 +202,12 @@ impl Judge {
             .map_err(|e| anyhow!("tokenize: {e}"))?;
 
         let n = encs.len();
-        let max_len = encs.iter().map(|e| e.get_ids().len()).max().unwrap_or(0).max(1);
+        let max_len = encs
+            .iter()
+            .map(|e| e.get_ids().len())
+            .max()
+            .unwrap_or(0)
+            .max(1);
         let mut ids = vec![0i64; n * max_len];
         let mut mask = vec![0i64; n * max_len];
         let mut types = vec![0i64; n * max_len];
@@ -285,7 +297,12 @@ fn decide(scores: &[[f32; 3]], threshold: f32, margin: f32) -> (Verdict, f32) {
 /// Emits `Supported` claims (ledgered, not reported) and `Contradicted` /
 /// `Unverifiable` problems, all tagged `layer = 3` and anchored to the evidence
 /// files so drift lineage can re-open them when that code changes.
-pub fn check(root: &Path, index: &CodeIndex, claims: &[ProseClaim], k: usize) -> Result<Vec<Finding>> {
+pub fn check(
+    root: &Path,
+    index: &CodeIndex,
+    claims: &[ProseClaim],
+    k: usize,
+) -> Result<Vec<Finding>> {
     if claims.is_empty() {
         return Ok(Vec::new());
     }
@@ -311,10 +328,18 @@ pub fn check(root: &Path, index: &CodeIndex, claims: &[ProseClaim], k: usize) ->
             claims
                 .iter()
                 .map(|c| {
-                    crate::evidence::gather(&c.text, &c.provenance, index, &lexicon, root, k, &mut files)
-                        .into_iter()
-                        .map(|e| (e.text, e.path, e.start_line))
-                        .collect()
+                    crate::evidence::gather(
+                        &c.text,
+                        &c.provenance,
+                        index,
+                        &lexicon,
+                        root,
+                        k,
+                        &mut files,
+                    )
+                    .into_iter()
+                    .map(|e| (e.text, e.path, e.start_line))
+                    .collect()
                 })
                 .collect()
         };
@@ -345,7 +370,9 @@ pub fn check(root: &Path, index: &CodeIndex, claims: &[ProseClaim], k: usize) ->
 
         let (verdict, conf) = judge.judge(&claim.text, &evidence)?;
         let mut finding = match verdict {
-            Verdict::Supported => Finding::supported(claim.text.clone(), claim.doc_ref.clone(), prov),
+            Verdict::Supported => {
+                Finding::supported(claim.text.clone(), claim.doc_ref.clone(), prov)
+            }
             v => Finding::problem(
                 v,
                 claim.text.clone(),
@@ -365,7 +392,11 @@ pub fn check(root: &Path, index: &CodeIndex, claims: &[ProseClaim], k: usize) ->
 /// Print elapsed time for a phase when `SHLOMES_TIMING` is set; no-op otherwise.
 pub(crate) fn timing(label: impl AsRef<str>, since: std::time::Instant) {
     if std::env::var_os("SHLOMES_TIMING").is_some() {
-        eprintln!("[timing] {}: {:.2}s", label.as_ref(), since.elapsed().as_secs_f32());
+        eprintln!(
+            "[timing] {}: {:.2}s",
+            label.as_ref(),
+            since.elapsed().as_secs_f32()
+        );
     }
 }
 
@@ -462,9 +493,7 @@ fn logical_lines(text: &str) -> Vec<(usize, String)> {
 /// A markdown ordered-list marker: `1.` / `2)` etc. at the start of the line.
 fn is_numbered_item(line: &str) -> bool {
     let digits: String = line.chars().take_while(|c| c.is_ascii_digit()).collect();
-    !digits.is_empty()
-        && line[digits.len()..]
-            .starts_with(['.', ')'])
+    !digits.is_empty() && line[digits.len()..].starts_with(['.', ')'])
 }
 
 /// True when the line ends mid-clause — a trailing comma/semicolon or a dangling
@@ -494,7 +523,9 @@ const DANGLING: &[&str] = &[
 /// describe a feature; they are not checkable propositions about specific code.
 /// (The leading `**` is already stripped as a list marker, so we match the close.)
 fn is_feature_entry(s: &str) -> bool {
-    ["** —", "**—", "** –", "**–"].iter().any(|sep| s.contains(sep))
+    ["** —", "**—", "** –", "**–"]
+        .iter()
+        .any(|sep| s.contains(sep))
 }
 
 /// A claim that opens with a lowercase letter is a list continuation or sentence
@@ -535,7 +566,9 @@ fn ground_claim(line: &str, index: &CodeIndex, modules: &HashSet<String>) -> Pro
     let mut prov = Provenance::default();
     for tok in backtick_tokens(line) {
         if let Some(sym) = index.symbols.iter().find(|s| {
-            s.qualified_name == tok || s.name == tok || s.qualified_name.ends_with(&format!("::{tok}"))
+            s.qualified_name == tok
+                || s.name == tok
+                || s.qualified_name.ends_with(&format!("::{tok}"))
         }) {
             if !prov.symbols.contains(&sym.qualified_name) {
                 prov.symbols.push(sym.qualified_name.clone());
@@ -585,12 +618,14 @@ mod tests {
 
     #[test]
     fn labels_resolved_from_config_by_name() {
-        let cfg = json!({ "id2label": { "0": "CONTRADICTION", "1": "ENTAILMENT", "2": "NEUTRAL" } });
+        let cfg =
+            json!({ "id2label": { "0": "CONTRADICTION", "1": "ENTAILMENT", "2": "NEUTRAL" } });
         let l = Labels::from_config(&cfg).unwrap();
         assert_eq!((l.contra, l.entail, l.neutral), (0, 1, 2));
 
         // MoritzLaurer-style ordering must resolve to the same semantics.
-        let cfg = json!({ "id2label": { "0": "entailment", "1": "neutral", "2": "contradiction" } });
+        let cfg =
+            json!({ "id2label": { "0": "entailment", "1": "neutral", "2": "contradiction" } });
         let l = Labels::from_config(&cfg).unwrap();
         assert_eq!((l.entail, l.neutral, l.contra), (0, 1, 2));
     }
@@ -623,7 +658,10 @@ plain sentence without code tokens here at all
 ";
         let claims = candidate_claims(md, "DOC.md", &CodeIndex::default());
         let texts: Vec<&str> = claims.iter().map(|c| c.text.as_str()).collect();
-        assert_eq!(texts, vec!["The cache invalidates on `write` and never on read."]);
+        assert_eq!(
+            texts,
+            vec!["The cache invalidates on `write` and never on read."]
+        );
         assert_eq!(claims[0].doc_ref, "DOC.md:2");
     }
 
@@ -693,7 +731,10 @@ The `check` command resolves `Manifests` from the nearest ancestor directory.
         // Strong entailment -> supported.
         assert_eq!(decide(&[[0.2, 0.9, 0.0]], 0.5, m).0, Verdict::Supported);
         // Both below threshold -> unverifiable.
-        assert_eq!(decide(&[[0.45, 0.4, 0.15]], 0.5, m).0, Verdict::Unverifiable);
+        assert_eq!(
+            decide(&[[0.45, 0.4, 0.15]], 0.5, m).0,
+            Verdict::Unverifiable
+        );
         // Entailment dominates the chunk -> supported (contra filtered by margin).
         assert_eq!(decide(&[[0.6, 0.85, 0.0]], 0.5, m).0, Verdict::Supported);
     }

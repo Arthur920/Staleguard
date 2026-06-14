@@ -44,11 +44,7 @@ pub(super) fn parse(body: &str, origin: &str) -> Option<Diagram> {
             let to = unquote(&c[2]);
             register(&from, None);
             register(&to, None);
-            edges.push(Edge {
-                from,
-                to,
-                directed,
-            });
+            edges.push(Edge { from, to, directed });
             continue;
         }
         // Node with explicit label: `a [label="A"]`.
@@ -115,7 +111,9 @@ fn is_keyword(s: &str) -> bool {
 
 fn edge_re() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| Regex::new(r#"("[^"]+"|[A-Za-z_]\w*)\s*(?:->|--)\s*("[^"]+"|[A-Za-z_]\w*)"#).unwrap())
+    RE.get_or_init(|| {
+        Regex::new(r#"("[^"]+"|[A-Za-z_]\w*)\s*(?:->|--)\s*("[^"]+"|[A-Za-z_]\w*)"#).unwrap()
+    })
 }
 
 fn node_label_re() -> &'static Regex {

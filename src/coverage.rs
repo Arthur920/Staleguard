@@ -172,7 +172,11 @@ fn finding_for(g: Gap) -> Finding {
     };
     Finding::problem(
         Verdict::Undocumented,
-        format!("public {} `{}` has no doc reference", kind.to_lowercase(), s.name),
+        format!(
+            "public {} `{}` has no doc reference",
+            kind.to_lowercase(),
+            s.name
+        ),
         format!("{}:{}", s.span.path, s.span.start_line),
         format!(
             "{} `{}` ({}) is documented nowhere; {}{}.",
@@ -227,7 +231,11 @@ mod tests {
             module_edges: vec![],
             ref_edges: vec![],
         };
-        let gaps = find_gaps(&index, &terms(&["something", "else"]), &RiskSignals::default());
+        let gaps = find_gaps(
+            &index,
+            &terms(&["something", "else"]),
+            &RiskSignals::default(),
+        );
         assert_eq!(gaps.len(), 1);
         assert_eq!(gaps[0].verdict, Verdict::Undocumented);
         assert!(gaps[0].detail.contains("frobnicate"));
@@ -301,14 +309,26 @@ mod tests {
             edges: vec![],
             module_edges: vec![],
             ref_edges: vec![
-                RefEdge { from_symbol: "a::x".into(), to_symbol: "cold::cold_fn".into() },
-                RefEdge { from_symbol: "b::y".into(), to_symbol: "cold::cold_fn".into() },
-                RefEdge { from_symbol: "c::z".into(), to_symbol: "cold::cold_fn".into() },
+                RefEdge {
+                    from_symbol: "a::x".into(),
+                    to_symbol: "cold::cold_fn".into(),
+                },
+                RefEdge {
+                    from_symbol: "b::y".into(),
+                    to_symbol: "cold::cold_fn".into(),
+                },
+                RefEdge {
+                    from_symbol: "c::z".into(),
+                    to_symbol: "cold::cold_fn".into(),
+                },
             ],
         };
         let mut no_codoc = HashSet::new();
         no_codoc.insert("fresh.rs".to_string()); // matches sym()'s `{module}.rs` path
-        let risk = RiskSignals { churn: HashMap::new(), no_codoc };
+        let risk = RiskSignals {
+            churn: HashMap::new(),
+            no_codoc,
+        };
 
         let gaps = find_gaps(&index, &HashSet::new(), &risk);
         assert_eq!(gaps.len(), 2);
@@ -331,7 +351,10 @@ mod tests {
         };
         let mut churn = HashMap::new();
         churn.insert("busy.rs".to_string(), 9);
-        let risk = RiskSignals { churn, no_codoc: HashSet::new() };
+        let risk = RiskSignals {
+            churn,
+            no_codoc: HashSet::new(),
+        };
 
         let gaps = find_gaps(&index, &HashSet::new(), &risk);
         assert!(gaps[0].detail.contains("busy_fn"), "{}", gaps[0].detail);
@@ -353,7 +376,11 @@ mod tests {
             "pub fn documented_fn() {}\npub fn hidden_fn() {}\n",
         )
         .unwrap();
-        fs::write(dir.join("README.md"), "We expose `documented_fn` for callers.\n").unwrap();
+        fs::write(
+            dir.join("README.md"),
+            "We expose `documented_fn` for callers.\n",
+        )
+        .unwrap();
 
         let findings = run(&dir);
         assert!(findings.iter().any(|f| f.detail.contains("hidden_fn")));

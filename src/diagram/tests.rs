@@ -54,7 +54,11 @@ fn ungrounded_endpoint_is_skipped() {
     // `User` matches no module → the edge is external, not a phantom; and `User`
     // has no path separator so it is not a stale box either.
     let md = mermaid("graph TD\n  User --> api[src/api]");
-    assert!(check(&md, "doc.md", &index, std::path::Path::new(".")).is_empty(), "{:?}", check(&md, "doc.md", &index, std::path::Path::new(".")));
+    assert!(
+        check(&md, "doc.md", &index, std::path::Path::new(".")).is_empty(),
+        "{:?}",
+        check(&md, "doc.md", &index, std::path::Path::new("."))
+    );
 }
 
 #[test]
@@ -181,7 +185,10 @@ fn class_and_sequence_ground_against_a_real_index() {
     use std::fs;
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    let nanos = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
     let dir = std::env::temp_dir().join(format!("shlomes-dogfood-{nanos}"));
     fs::create_dir_all(dir.join("src")).unwrap();
     fs::write(
@@ -203,23 +210,21 @@ fn class_and_sequence_ground_against_a_real_index() {
     let index = crate::code::CodeIndex::build(&dir);
 
     // Class diagram: `validate` is real, `purge` is not.
-    let class = mermaid(
-        "classDiagram\n  class Service {\n    +validate()\n    +purge()\n  }",
-    );
+    let class = mermaid("classDiagram\n  class Service {\n    +validate()\n    +purge()\n  }");
     let cf = check(&class, "doc.md", &index, &dir);
     assert!(
-        cf.iter().any(|f| f.verdict == Verdict::Supported && f.claim.contains("validate")),
+        cf.iter()
+            .any(|f| f.verdict == Verdict::Supported && f.claim.contains("validate")),
         "{cf:?}"
     );
     assert!(
-        cf.iter().any(|f| f.verdict == Verdict::Stale && f.detail.contains("purge")),
+        cf.iter()
+            .any(|f| f.verdict == Verdict::Stale && f.detail.contains("purge")),
         "{cf:?}"
     );
 
     // Sequence diagram: `handle` calls step_one then step_two, in order.
-    let seq = mermaid(
-        "sequenceDiagram\n  H->>S: step_one()\n  H->>S: step_two()",
-    );
+    let seq = mermaid("sequenceDiagram\n  H->>S: step_one()\n  H->>S: step_two()");
     let sf = check(&seq, "doc.md", &index, &dir);
     assert!(!sf.is_empty(), "sequence should ground to `handle`");
     assert!(sf.iter().all(|f| f.verdict == Verdict::Supported), "{sf:?}");

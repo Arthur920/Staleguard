@@ -180,9 +180,7 @@ mod tests {
 
     fn facts_of_rust(src: &str) -> Facts {
         let mut parser = Parser::new();
-        parser
-            .set_language(&Language::Rust.ts_language())
-            .unwrap();
+        parser.set_language(&Language::Rust.ts_language()).unwrap();
         let tree = parser.parse(src, None).unwrap();
         let node = root_fn(&tree, src.as_bytes());
         extract(node, src.as_bytes(), Language::Rust, Some("fn f()".into()))

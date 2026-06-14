@@ -52,7 +52,10 @@ impl Reranker {
             }))
             .map_err(|e| anyhow!("set truncation: {e}"))?;
 
-        let needs_token_types = session.inputs().iter().any(|i| i.name() == "token_type_ids");
+        let needs_token_types = session
+            .inputs()
+            .iter()
+            .any(|i| i.name() == "token_type_ids");
         Ok(Some(Reranker {
             session,
             tokenizer,

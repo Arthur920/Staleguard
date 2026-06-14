@@ -66,7 +66,11 @@ fn rust_candidates(raw: &str, from_module: &str) -> Vec<String> {
     let mut out = Vec::new();
 
     let owned = |segs: &[&str]| -> Vec<String> { segs.iter().map(|s| s.to_string()).collect() };
-    let parent: Vec<&str> = if from.len() > 1 { from[..from.len() - 1].to_vec() } else { from.clone() };
+    let parent: Vec<&str> = if from.len() > 1 {
+        from[..from.len() - 1].to_vec()
+    } else {
+        from.clone()
+    };
 
     match segs.first().map(String::as_str) {
         Some("crate") => {
@@ -120,7 +124,10 @@ fn dotted_candidates(raw: &str, from_module: &str) -> Vec<String> {
     // Relative to the importing package (parent dir of `from_module`).
     let from = parts(from_module);
     if from.len() > 1 {
-        let mut rel: Vec<String> = from[..from.len() - 1].iter().map(|s| s.to_string()).collect();
+        let mut rel: Vec<String> = from[..from.len() - 1]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
         rel.extend_from_slice(&segs);
         push_with_trimmed(&rel, &mut out);
     }
@@ -136,7 +143,10 @@ fn js_candidates(raw: &str, from_module: &str) -> Vec<String> {
     // Directory of the importing module.
     let from = parts(from_module);
     let mut stack: Vec<String> = if from.len() > 1 {
-        from[..from.len() - 1].iter().map(|s| s.to_string()).collect()
+        from[..from.len() - 1]
+            .iter()
+            .map(|s| s.to_string())
+            .collect()
     } else {
         Vec::new()
     };

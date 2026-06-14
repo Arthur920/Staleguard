@@ -214,9 +214,10 @@ fn resolved_symbols<'a>(
     prov: &'a Provenance,
     index: &'a CodeIndex,
 ) -> impl Iterator<Item = &'a crate::code::symbol::Symbol> {
-    index.symbols.iter().filter(move |s| {
-        prov.symbols.contains(&s.qualified_name) || prov.symbols.contains(&s.name)
-    })
+    index
+        .symbols
+        .iter()
+        .filter(move |s| prov.symbols.contains(&s.qualified_name) || prov.symbols.contains(&s.name))
 }
 
 /// Modules a claim is scored under: its module anchors, the modules of any

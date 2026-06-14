@@ -57,7 +57,10 @@ fn parse(body: &str) -> Option<Vec<EntityDecl>> {
         match entities.iter().position(|e| e.name == name) {
             Some(i) => i,
             None => {
-                entities.push(EntityDecl { name: name.to_string(), attrs: Vec::new() });
+                entities.push(EntityDecl {
+                    name: name.to_string(),
+                    attrs: Vec::new(),
+                });
                 entities.len() - 1
             }
         }
@@ -174,7 +177,9 @@ mod tests {
 
     fn check_with(body: &str, schema: &Schema) -> Vec<Finding> {
         // The parse+diff path without touching the filesystem.
-        let Some(entities) = parse(body) else { return Vec::new() };
+        let Some(entities) = parse(body) else {
+            return Vec::new();
+        };
         if schema.is_empty() {
             return Vec::new();
         }
@@ -185,8 +190,12 @@ mod tests {
     fn grounded_entity_attribute_supported_and_stale_flagged() {
         let body = "erDiagram\n  CUSTOMER {\n    int id\n    string name\n    string ssn\n  }\n";
         let out = check_with(body, &schema());
-        assert!(out.iter().any(|f| f.verdict == Verdict::Supported && f.claim.contains("`name`")));
-        assert!(out.iter().any(|f| f.verdict == Verdict::Stale && f.detail.contains("ssn")));
+        assert!(out
+            .iter()
+            .any(|f| f.verdict == Verdict::Supported && f.claim.contains("`name`")));
+        assert!(out
+            .iter()
+            .any(|f| f.verdict == Verdict::Stale && f.detail.contains("ssn")));
     }
 
     #[test]

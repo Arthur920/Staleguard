@@ -22,7 +22,7 @@ use regex::Regex;
 
 use super::Format;
 use crate::claim::Provenance;
-use crate::code::symbol::{SymbolKind, Symbol};
+use crate::code::symbol::{Symbol, SymbolKind};
 use crate::code::CodeIndex;
 use crate::findings::{Finding, Verdict};
 
@@ -77,7 +77,10 @@ fn parse_body(body: &str, origin: &str) -> Option<ClassDiagram> {
         match classes.iter().position(|c| c.name == name) {
             Some(i) => i,
             None => {
-                classes.push(ClassDecl { name: name.to_string(), methods: Vec::new() });
+                classes.push(ClassDecl {
+                    name: name.to_string(),
+                    methods: Vec::new(),
+                });
                 classes.len() - 1
             }
         }
@@ -117,7 +120,10 @@ fn parse_body(body: &str, origin: &str) -> Option<ClassDiagram> {
         // Anything else (relations, notes) is ignored.
     }
 
-    (!classes.is_empty()).then_some(ClassDiagram { classes, origin: origin.to_string() })
+    (!classes.is_empty()).then_some(ClassDiagram {
+        classes,
+        origin: origin.to_string(),
+    })
 }
 
 /// The method name of a member line (`+isMammal()`, `-save() : bool`), or `None`
@@ -157,7 +163,9 @@ fn diff(d: &ClassDiagram, index: &CodeIndex) -> Vec<Finding> {
         ));
         let module_methods = methods_by_module.get(sym.module.as_str());
         for m in &c.methods {
-            let exists = module_methods.map(|set| set.contains(m.as_str())).unwrap_or(false);
+            let exists = module_methods
+                .map(|set| set.contains(m.as_str()))
+                .unwrap_or(false);
             if exists {
                 out.push(Finding::supported(
                     format!("class `{}` method `{m}`", c.name),
@@ -197,7 +205,9 @@ fn is_type(kind: &SymbolKind) -> bool {
 fn class_open_re() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     // `class Foo`, `class Foo {`, `class "Foo" as F`.
-    RE.get_or_init(|| Regex::new(r#"^class\s+("?[A-Za-z_][\w]*"?)(?:\s+as\s+\w+)?\s*\{?\s*$"#).unwrap())
+    RE.get_or_init(|| {
+        Regex::new(r#"^class\s+("?[A-Za-z_][\w]*"?)(?:\s+as\s+\w+)?\s*\{?\s*$"#).unwrap()
+    })
 }
 
 fn inline_re() -> &'static Regex {
@@ -224,7 +234,11 @@ mod tests {
             kind,
             visibility: Visibility::Public,
             module: module.to_string(),
-            span: Span { path: format!("{module}.rs"), start_line: 1, end_line: 1 },
+            span: Span {
+                path: format!("{module}.rs"),
+                start_line: 1,
+                end_line: 1,
+            },
             body_span: Span::zero(),
             signature: None,
             doc: None,
@@ -260,7 +274,9 @@ mod tests {
         assert!(out
             .iter()
             .any(|f| f.verdict == Verdict::Stale && f.detail.contains("withdraw")));
-        assert!(out.iter().any(|f| f.verdict == Verdict::Supported && f.claim.contains("balance")));
+        assert!(out
+            .iter()
+            .any(|f| f.verdict == Verdict::Supported && f.claim.contains("balance")));
     }
 
     #[test]

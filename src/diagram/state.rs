@@ -173,7 +173,11 @@ mod tests {
             kind: SymbolKind::Enum,
             visibility: Visibility::Public,
             module: "m".to_string(),
-            span: Span { path: "m.rs".into(), start_line: 1, end_line: 1 },
+            span: Span {
+                path: "m.rs".into(),
+                start_line: 1,
+                end_line: 1,
+            },
             body_span: Span::zero(),
             signature: None,
             doc: None,
@@ -184,13 +188,17 @@ mod tests {
     }
 
     fn index(syms: Vec<Symbol>) -> CodeIndex {
-        CodeIndex { symbols: syms, ..Default::default() }
+        CodeIndex {
+            symbols: syms,
+            ..Default::default()
+        }
     }
 
     #[test]
     fn stale_state_not_a_variant_is_flagged() {
         let idx = index(vec![enum_sym("State", &["Idle", "Running", "Done"])]);
-        let body = "stateDiagram-v2\n  [*] --> Idle\n  Idle --> Running : start\n  Running --> Paused\n";
+        let body =
+            "stateDiagram-v2\n  [*] --> Idle\n  Idle --> Running : start\n  Running --> Paused\n";
         let out = check(Format::Mermaid, body, "d.md:1", &idx);
         assert!(out
             .iter()
@@ -199,7 +207,9 @@ mod tests {
         assert!(out
             .iter()
             .any(|f| f.verdict == Verdict::Undocumented && f.detail.contains("Done")));
-        assert!(out.iter().any(|f| f.verdict == Verdict::Supported && f.claim.contains("Idle")));
+        assert!(out
+            .iter()
+            .any(|f| f.verdict == Verdict::Supported && f.claim.contains("Idle")));
     }
 
     #[test]

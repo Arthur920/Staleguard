@@ -33,8 +33,10 @@ pub struct Grounding {
 impl Grounding {
     pub fn from_index(index: &CodeIndex) -> Grounding {
         let mut names = HashSet::new();
-        let mut anchors: HashSet<String> =
-            ["crate", "self", "super"].iter().map(|s| s.to_string()).collect();
+        let mut anchors: HashSet<String> = ["crate", "self", "super"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
 
         for s in &index.symbols {
             names.insert(s.name.clone());
@@ -139,9 +141,7 @@ fn inline_code_re() -> &'static Regex {
 
 fn qualified_re() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| {
-        Regex::new(r"([A-Za-z_][A-Za-z0-9_]*(?:::[A-Za-z_][A-Za-z0-9_]*)+)").unwrap()
-    })
+    RE.get_or_init(|| Regex::new(r"([A-Za-z_][A-Za-z0-9_]*(?:::[A-Za-z_][A-Za-z0-9_]*)+)").unwrap())
 }
 
 #[cfg(test)]

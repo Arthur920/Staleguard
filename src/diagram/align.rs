@@ -163,7 +163,11 @@ fn align(steps: &[String], calls: &[String]) -> Vec<Op> {
     for i in 1..=m {
         for j in 1..=n {
             let sub = score[i - 1][j - 1]
-                + if steps[i - 1] == calls[j - 1] { MATCH } else { MISMATCH };
+                + if steps[i - 1] == calls[j - 1] {
+                    MATCH
+                } else {
+                    MISMATCH
+                };
             let del = score[i - 1][j] + GAP; // diagram-only
             let ins = score[i][j - 1] + GAP; // code-only
             score[i][j] = sub.max(del).max(ins);
@@ -176,7 +180,11 @@ fn align(steps: &[String], calls: &[String]) -> Vec<Op> {
     while i > 0 || j > 0 {
         if i > 0 && j > 0 {
             let diag = score[i - 1][j - 1]
-                + if steps[i - 1] == calls[j - 1] { MATCH } else { MISMATCH };
+                + if steps[i - 1] == calls[j - 1] {
+                    MATCH
+                } else {
+                    MISMATCH
+                };
             if score[i][j] == diag {
                 ops.push(Op::Sub);
                 i -= 1;
@@ -208,7 +216,11 @@ mod tests {
             kind: SymbolKind::Function,
             visibility: Visibility::Public,
             module: "m".to_string(),
-            span: Span { path: "m.rs".into(), start_line: 1, end_line: 1 },
+            span: Span {
+                path: "m.rs".into(),
+                start_line: 1,
+                end_line: 1,
+            },
             body_span: Span::zero(),
             signature: None,
             doc: None,
@@ -224,14 +236,21 @@ mod tests {
             participants: vec![],
             messages: steps
                 .iter()
-                .map(|s| Message { from: "A".into(), to: "B".into(), label: format!("{s}()") })
+                .map(|s| Message {
+                    from: "A".into(),
+                    to: "B".into(),
+                    label: format!("{s}()"),
+                })
                 .collect(),
             origin: "d.md:1".into(),
         }
     }
 
     fn index(syms: Vec<Symbol>) -> CodeIndex {
-        CodeIndex { symbols: syms, ..Default::default() }
+        CodeIndex {
+            symbols: syms,
+            ..Default::default()
+        }
     }
 
     #[test]
@@ -253,7 +272,12 @@ mod tests {
             .iter()
             .any(|f| f.verdict == Verdict::Undocumented && f.detail.contains("rateLimit")));
         // validate + save still match.
-        assert_eq!(out.iter().filter(|f| f.verdict == Verdict::Supported).count(), 2);
+        assert_eq!(
+            out.iter()
+                .filter(|f| f.verdict == Verdict::Supported)
+                .count(),
+            2
+        );
     }
 
     #[test]

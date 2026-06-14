@@ -241,8 +241,7 @@ fn diff(d: &Diagram, index: &CodeIndex, modules: &HashSet<String>) -> Vec<Findin
         if !grounded(&from, modules) || !grounded(&to, modules) {
             continue; // an endpoint is an external/undocumented box → skip
         }
-        let exists =
-            real_edge(index, &from, &to) || (!e.directed && real_edge(index, &to, &from));
+        let exists = real_edge(index, &from, &to) || (!e.directed && real_edge(index, &to, &from));
         let prov = Provenance::modules([from.clone(), to.clone()]);
         if exists {
             out.push(Finding::supported(

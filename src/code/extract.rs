@@ -9,9 +9,9 @@ use streaming_iterator::StreamingIterator;
 use tree_sitter::{Node, Parser, QueryCursor, Tree};
 use tree_sitter_tags::TagsContext;
 
+use crate::code::facts;
 use crate::code::lang::{self, Language};
 use crate::code::symbol::{DepEdge, Span, Symbol, SymbolKind, Visibility};
-use crate::code::facts;
 
 /// A reference whose enclosing definition has been resolved intra-file. `from`
 /// is the enclosing symbol's `qualified_name` (or the module path for top-level
@@ -118,7 +118,10 @@ fn symbols_and_refs(
                 },
                 facts::extract(node, source, language, decl_line.clone()),
             ),
-            None => (span.clone(), facts::extract_signature_only(decl_line.clone())),
+            None => (
+                span.clone(),
+                facts::extract_signature_only(decl_line.clone()),
+            ),
         };
 
         // tree-sitter-tags collapses enums into the `class` tag kind, so detect
@@ -329,10 +332,17 @@ fn map_kind(name: &str) -> SymbolKind {
 }
 
 fn classify_visibility(language: Language, decl_line: &str, name: &str) -> Visibility {
-    let has_word = |w: &str| decl_line.split(|c: char| !c.is_alphanumeric()).any(|t| t == w);
+    let has_word = |w: &str| {
+        decl_line
+            .split(|c: char| !c.is_alphanumeric())
+            .any(|t| t == w)
+    };
     match language {
         Language::Rust => {
-            if decl_line.split_whitespace().any(|w| w == "pub" || w.starts_with("pub(")) {
+            if decl_line
+                .split_whitespace()
+                .any(|w| w == "pub" || w.starts_with("pub("))
+            {
                 Visibility::Public
             } else {
                 Visibility::Private
@@ -381,13 +391,24 @@ fn extract_symbols_and_refs(
     rel: &str,
 ) -> (Vec<Symbol>, Vec<RawRef>) {
     let tree = parse_tree(language, source);
-    symbols_and_refs(language, source, module, rel, tree.as_ref().map(|t| t.root_node()))
+    symbols_and_refs(
+        language,
+        source,
+        module,
+        rel,
+        tree.as_ref().map(|t| t.root_node()),
+    )
 }
 
 #[cfg(test)]
 fn extract_edges(language: Language, source: &[u8], module: &str) -> Vec<DepEdge> {
     let tree = parse_tree(language, source);
-    import_edges(language, source, module, tree.as_ref().map(|t| t.root_node()))
+    import_edges(
+        language,
+        source,
+        module,
+        tree.as_ref().map(|t| t.root_node()),
+    )
 }
 
 #[cfg(test)]

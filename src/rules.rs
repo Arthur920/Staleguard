@@ -29,7 +29,10 @@ pub enum Rule {
     /// `from` must not depend on `to`.
     ForbidEdge { from: String, to: String },
     /// `module` may depend only on `allowed` (empty ⇒ "depends on nothing").
-    Layer { module: String, allowed: Vec<String> },
+    Layer {
+        module: String,
+        allowed: Vec<String>,
+    },
     /// `symbol` must not appear outside the `except` modules.
     ForbidSymbol { symbol: String, except: Vec<String> },
 }
@@ -54,30 +57,56 @@ pub fn extract_prose_rules(markdown: &str, doc_path: &str) -> Vec<SourcedRule> {
         let line = quoted_re().replace_all(line, "");
         let line = line.as_ref();
         let origin = format!("{doc_path}:{}", i + 1);
-        let mut push = |rule| rules.push(SourcedRule { rule, origin: origin.clone() });
+        let mut push = |rule| {
+            rules.push(SourcedRule {
+                rule,
+                origin: origin.clone(),
+            })
+        };
 
         for c in forbid_edge_re().captures_iter(line) {
-            push(Rule::ForbidEdge { from: c[1].to_string(), to: c[2].to_string() });
+            push(Rule::ForbidEdge {
+                from: c[1].to_string(),
+                to: c[2].to_string(),
+            });
         }
         for c in never_edge_re().captures_iter(line) {
-            push(Rule::ForbidEdge { from: c[1].to_string(), to: c[2].to_string() });
+            push(Rule::ForbidEdge {
+                from: c[1].to_string(),
+                to: c[2].to_string(),
+            });
         }
         // "`db` must not be imported by `api`" — reverse direction (api -> db).
         for c in forbid_by_re().captures_iter(line) {
-            push(Rule::ForbidEdge { from: c[2].to_string(), to: c[1].to_string() });
+            push(Rule::ForbidEdge {
+                from: c[2].to_string(),
+                to: c[1].to_string(),
+            });
         }
         // "`domain` is independent of `infra`" — symmetric: forbid both edges.
         for c in independent_re().captures_iter(line) {
-            push(Rule::ForbidEdge { from: c[1].to_string(), to: c[2].to_string() });
-            push(Rule::ForbidEdge { from: c[2].to_string(), to: c[1].to_string() });
+            push(Rule::ForbidEdge {
+                from: c[1].to_string(),
+                to: c[2].to_string(),
+            });
+            push(Rule::ForbidEdge {
+                from: c[2].to_string(),
+                to: c[1].to_string(),
+            });
         }
         for c in depends_nothing_re().captures_iter(line) {
-            push(Rule::Layer { module: c[1].to_string(), allowed: Vec::new() });
+            push(Rule::Layer {
+                module: c[1].to_string(),
+                allowed: Vec::new(),
+            });
         }
         for c in only_depends_re().captures_iter(line) {
             let allowed = backtick_tokens(&c[2]);
             if !allowed.is_empty() {
-                push(Rule::Layer { module: c[1].to_string(), allowed });
+                push(Rule::Layer {
+                    module: c[1].to_string(),
+                    allowed,
+                });
             }
         }
         for c in forbid_symbol_re().captures_iter(line) {
@@ -124,7 +153,8 @@ pub fn check(rules: &[SourcedRule], index: &CodeIndex, repo_root: &Path) -> Vec<
                 // clean rule is anchored to them so adding the symbol in any of
                 // them re-opens the claim (precise lineage, fixing the old empty
                 // provenance that could never carry forward).
-                let scanned = check_forbid_symbol(sr, symbol, except, index, &sources, &mut findings);
+                let scanned =
+                    check_forbid_symbol(sr, symbol, except, index, &sources, &mut findings);
                 if findings.len() == before && !scanned.is_empty() {
                     findings.push(Finding::supported(
                         format!("forbids `{symbol}`"),
@@ -324,7 +354,10 @@ fn check_forbid_symbol(
                     Verdict::Contradicted,
                     format!("forbids `{symbol}`"),
                     sr.origin.clone(),
-                    format!("Rule forbids `{symbol}`, but `{}` references it.", edge.from_symbol),
+                    format!(
+                        "Rule forbids `{symbol}`, but `{}` references it.",
+                        edge.from_symbol
+                    ),
                 )
                 .anchored(Provenance::symbol(edge.from_symbol.clone()))
                 .with_refs(vec![edge.from_symbol.clone()]),
@@ -341,12 +374,17 @@ fn check_forbid_symbol(
 /// `qualified_name`, by a `::`-qualified suffix, or by leaf name.
 fn symbol_identifies(operand: &str, s: &crate::code::symbol::Symbol) -> bool {
     let leaf = operand.rsplit([':', '.']).next().unwrap_or(operand);
-    s.qualified_name == operand || s.qualified_name.ends_with(&format!("::{operand}")) || s.name == leaf
+    s.qualified_name == operand
+        || s.qualified_name.ends_with(&format!("::{operand}"))
+        || s.name == leaf
 }
 
 /// Module path of a `module::name` qualified symbol.
 fn module_of(qualified: &str) -> &str {
-    qualified.rsplit_once("::").map(|(m, _)| m).unwrap_or(qualified)
+    qualified
+        .rsplit_once("::")
+        .map(|(m, _)| m)
+        .unwrap_or(qualified)
 }
 
 /// A finding for a violated module-graph rule.
@@ -533,7 +571,10 @@ mod tests {
     }
 
     fn scratch_dir(tag: &str) -> std::path::PathBuf {
-        let nanos = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
         let dir = std::env::temp_dir().join(format!("shlomes-rules-{tag}-{nanos}"));
         fs::create_dir_all(&dir).unwrap();
         dir
@@ -546,12 +587,7 @@ mod tests {
             symbols: vec![],
             edges: edges
                 .iter()
-                .flat_map(|e| {
-                    [
-                        edge(&e.from_module, "x"),
-                        edge(&e.to_module, "x"),
-                    ]
-                })
+                .flat_map(|e| [edge(&e.from_module, "x"), edge(&e.to_module, "x")])
                 .collect(),
             module_edges: edges,
             ref_edges: vec![],
@@ -559,13 +595,19 @@ mod tests {
     }
 
     fn rule(r: Rule) -> Vec<SourcedRule> {
-        vec![SourcedRule { rule: r, origin: "rules".into() }]
+        vec![SourcedRule {
+            rule: r,
+            origin: "rules".into(),
+        }]
     }
 
     #[test]
     fn forbid_edge_violation_is_contradicted() {
         let idx = index(vec![edge("src/api", "src/db")]);
-        let rules = rule(Rule::ForbidEdge { from: "src/api".into(), to: "src/db".into() });
+        let rules = rule(Rule::ForbidEdge {
+            from: "src/api".into(),
+            to: "src/db".into(),
+        });
         let f = check(&rules, &idx, Path::new("."));
         assert_eq!(f.len(), 1);
         assert_eq!(f[0].verdict, Verdict::Contradicted);
@@ -575,7 +617,10 @@ mod tests {
     #[test]
     fn forbid_edge_clean_repo_passes() {
         let idx = index(vec![edge("src/api", "src/domain")]);
-        let rules = rule(Rule::ForbidEdge { from: "src/api".into(), to: "src/db".into() });
+        let rules = rule(Rule::ForbidEdge {
+            from: "src/api".into(),
+            to: "src/db".into(),
+        });
         assert!(check(&rules, &idx, Path::new(".")).is_empty());
     }
 
@@ -583,21 +628,30 @@ mod tests {
     fn ungrounded_operand_is_skipped() {
         let idx = index(vec![edge("src/api", "src/db")]);
         // `ghost` matches no real module → rule unverifiable, not flagged.
-        let rules = rule(Rule::ForbidEdge { from: "ghost".into(), to: "src/db".into() });
+        let rules = rule(Rule::ForbidEdge {
+            from: "ghost".into(),
+            to: "src/db".into(),
+        });
         assert!(check(&rules, &idx, Path::new(".")).is_empty());
     }
 
     #[test]
     fn conceptual_name_matches_real_path() {
         let idx = index(vec![edge("src/api", "src/db")]);
-        let rules = rule(Rule::ForbidEdge { from: "api".into(), to: "db".into() });
+        let rules = rule(Rule::ForbidEdge {
+            from: "api".into(),
+            to: "db".into(),
+        });
         assert_eq!(check(&rules, &idx, Path::new(".")).len(), 1);
     }
 
     #[test]
     fn layer_depends_on_nothing() {
         let idx = index(vec![edge("src/domain", "src/infra")]);
-        let rules = rule(Rule::Layer { module: "src/domain".into(), allowed: vec![] });
+        let rules = rule(Rule::Layer {
+            module: "src/domain".into(),
+            allowed: vec![],
+        });
         assert_eq!(check(&rules, &idx, Path::new(".")).len(), 1);
     }
 
@@ -624,7 +678,10 @@ mod tests {
         let rules = extract_prose_rules(md, "ARCH.md");
         assert_eq!(
             rules[0].rule,
-            Rule::ForbidEdge { from: "controllers".into(), to: "db".into() }
+            Rule::ForbidEdge {
+                from: "controllers".into(),
+                to: "db".into()
+            }
         );
         assert_eq!(rules[0].origin, "ARCH.md:1");
     }
@@ -633,7 +690,13 @@ mod tests {
     fn prose_depends_on_nothing_extracted() {
         let md = "`domain` depends on nothing.";
         let rules = extract_prose_rules(md, "ARCH.md");
-        assert_eq!(rules[0].rule, Rule::Layer { module: "domain".into(), allowed: vec![] });
+        assert_eq!(
+            rules[0].rule,
+            Rule::Layer {
+                module: "domain".into(),
+                allowed: vec![]
+            }
+        );
     }
 
     #[test]
@@ -642,7 +705,10 @@ mod tests {
         let rules = extract_prose_rules(md, "ARCH.md");
         assert_eq!(
             rules[0].rule,
-            Rule::Layer { module: "api".into(), allowed: vec!["domain".into(), "util".into()] }
+            Rule::Layer {
+                module: "api".into(),
+                allowed: vec!["domain".into(), "util".into()]
+            }
         );
     }
 
@@ -652,7 +718,10 @@ mod tests {
         let rules = extract_prose_rules(md, "ARCH.md");
         assert_eq!(
             rules[0].rule,
-            Rule::ForbidSymbol { symbol: "os.environ".into(), except: vec!["config".into()] }
+            Rule::ForbidSymbol {
+                symbol: "os.environ".into(),
+                except: vec!["config".into()]
+            }
         );
     }
 
@@ -678,27 +747,48 @@ mod tests {
         let rules = extract_prose_rules(md, "ARCH.md");
         assert_eq!(
             rules[0].rule,
-            Rule::ForbidEdge { from: "controllers".into(), to: "db".into() }
+            Rule::ForbidEdge {
+                from: "controllers".into(),
+                to: "db".into()
+            }
         );
     }
 
     #[test]
     fn prose_independent_is_symmetric() {
         let md = "`domain` is independent of `infra`.";
-        let kinds: Vec<Rule> = extract_prose_rules(md, "ARCH.md").into_iter().map(|s| s.rule).collect();
-        assert!(kinds.contains(&Rule::ForbidEdge { from: "domain".into(), to: "infra".into() }));
-        assert!(kinds.contains(&Rule::ForbidEdge { from: "infra".into(), to: "domain".into() }));
+        let kinds: Vec<Rule> = extract_prose_rules(md, "ARCH.md")
+            .into_iter()
+            .map(|s| s.rule)
+            .collect();
+        assert!(kinds.contains(&Rule::ForbidEdge {
+            from: "domain".into(),
+            to: "infra".into()
+        }));
+        assert!(kinds.contains(&Rule::ForbidEdge {
+            from: "infra".into(),
+            to: "domain".into()
+        }));
     }
 
     #[test]
     fn clean_forbid_symbol_is_anchored_to_scanned_modules() {
         let dir = scratch_dir("clean-symbol");
         fs::write(dir.join("safe.rs"), "fn ok() {}\n").unwrap();
-        let rules = rule(Rule::ForbidSymbol { symbol: "eval".into(), except: vec![] });
+        let rules = rule(Rule::ForbidSymbol {
+            symbol: "eval".into(),
+            except: vec![],
+        });
         let f = check(&rules, &index(vec![]), &dir);
-        let supported: Vec<&Finding> = f.iter().filter(|x| x.verdict == Verdict::Supported).collect();
+        let supported: Vec<&Finding> = f
+            .iter()
+            .filter(|x| x.verdict == Verdict::Supported)
+            .collect();
         assert_eq!(supported.len(), 1);
-        assert!(!supported[0].provenance.modules.is_empty(), "must anchor to scanned modules");
+        assert!(
+            !supported[0].provenance.modules.is_empty(),
+            "must anchor to scanned modules"
+        );
     }
 
     #[test]
@@ -712,7 +802,10 @@ mod tests {
             from_symbol: "src/app::run".into(),
             to_symbol: "src/legacy::Client".into(),
         }];
-        let rules = rule(Rule::ForbidSymbol { symbol: "legacy::Client".into(), except: vec![] });
+        let rules = rule(Rule::ForbidSymbol {
+            symbol: "legacy::Client".into(),
+            except: vec![],
+        });
         // Empty repo dir → text scan finds nothing; only the ref edge fires.
         let f = check(&rules, &idx, &scratch_dir("indirect"));
         assert!(f
@@ -733,7 +826,10 @@ mod tests {
             from_symbol: "src/app::run".into(),
             to_symbol: "src/legacy::Client".into(),
         }];
-        let rules = rule(Rule::ForbidSymbol { symbol: "Client".into(), except: vec![] });
+        let rules = rule(Rule::ForbidSymbol {
+            symbol: "Client".into(),
+            except: vec![],
+        });
         let f = check(&rules, &idx, &scratch_dir("ambiguous"));
         assert!(f.iter().all(|x| x.verdict != Verdict::Contradicted));
     }

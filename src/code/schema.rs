@@ -44,10 +44,9 @@ impl Schema {
     /// (ER `CUSTOMER` ↔ table `customers`).
     pub fn entity(&self, name: &str) -> Option<&Entity> {
         let n = name.to_ascii_lowercase();
-        self.entities.iter().find(|e| {
-            e.name == n
-                || e.name.trim_end_matches('s') == n.trim_end_matches('s')
-        })
+        self.entities
+            .iter()
+            .find(|e| e.name == n || e.name.trim_end_matches('s') == n.trim_end_matches('s'))
     }
 }
 
@@ -75,13 +74,17 @@ fn from_sql(text: &str) -> Vec<Entity> {
         let stmt_start = search + rel;
         // Table name: the identifier after `create table [if not exists]`.
         let after = &text[stmt_start + "create table".len()..];
-        let Some(paren_rel) = after.find('(') else { break };
+        let Some(paren_rel) = after.find('(') else {
+            break;
+        };
         let header = &after[..paren_rel];
         let name = header
             .split_whitespace()
-            .filter(|w| !w.eq_ignore_ascii_case("if")
-                && !w.eq_ignore_ascii_case("not")
-                && !w.eq_ignore_ascii_case("exists"))
+            .filter(|w| {
+                !w.eq_ignore_ascii_case("if")
+                    && !w.eq_ignore_ascii_case("not")
+                    && !w.eq_ignore_ascii_case("exists")
+            })
             .next_back()
             .map(clean_ident)
             .unwrap_or_default();
@@ -103,7 +106,10 @@ fn from_sql(text: &str) -> Vec<Entity> {
                 (!id.is_empty() && !is_constraint(&id)).then_some(id)
             })
             .collect();
-        entities.push(Entity { name: name.to_ascii_lowercase(), fields });
+        entities.push(Entity {
+            name: name.to_ascii_lowercase(),
+            fields,
+        });
     }
     entities
 }
@@ -190,7 +196,10 @@ mod tests {
     #[test]
     fn entity_lookup_tolerates_case_and_plural() {
         let schema = Schema {
-            entities: vec![Entity { name: "customers".into(), fields: vec!["id".into()] }],
+            entities: vec![Entity {
+                name: "customers".into(),
+                fields: vec!["id".into()],
+            }],
         };
         assert!(schema.entity("CUSTOMER").is_some());
         assert!(schema.entity("customers").is_some());

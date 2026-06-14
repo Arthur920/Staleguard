@@ -225,22 +225,47 @@ mod tests {
 
     #[test]
     fn fan_in_counts_distinct_callers() {
-        let symbols = vec![sym("target", "m::target"), sym("a", "m::a"), sym("b", "m::b")];
+        let symbols = vec![
+            sym("target", "m::target"),
+            sym("a", "m::a"),
+            sym("b", "m::b"),
+        ];
         // a and b each call target; a calls it twice -> still one distinct caller.
         let raw = vec![
-            RawRef { from: "m::a".into(), name: "target".into() },
-            RawRef { from: "m::a".into(), name: "target".into() },
-            RawRef { from: "m::b".into(), name: "target".into() },
+            RawRef {
+                from: "m::a".into(),
+                name: "target".into(),
+            },
+            RawRef {
+                from: "m::a".into(),
+                name: "target".into(),
+            },
+            RawRef {
+                from: "m::b".into(),
+                name: "target".into(),
+            },
         ];
         let ref_edges = resolve_refs(&symbols, raw);
-        let index = CodeIndex { symbols, edges: vec![], module_edges: vec![], ref_edges };
+        let index = CodeIndex {
+            symbols,
+            edges: vec![],
+            module_edges: vec![],
+            ref_edges,
+        };
         assert_eq!(index.symbol_fan_in("m::target"), 2);
     }
 
     #[test]
     fn over_approximates_on_name_collision() {
-        let symbols = vec![sym("run", "a::run"), sym("run", "b::run"), sym("caller", "c::caller")];
-        let raw = vec![RawRef { from: "c::caller".into(), name: "run".into() }];
+        let symbols = vec![
+            sym("run", "a::run"),
+            sym("run", "b::run"),
+            sym("caller", "c::caller"),
+        ];
+        let raw = vec![RawRef {
+            from: "c::caller".into(),
+            name: "run".into(),
+        }];
         let edges = resolve_refs(&symbols, raw);
         assert!(edges.iter().any(|e| e.to_symbol == "a::run"));
         assert!(edges.iter().any(|e| e.to_symbol == "b::run"));
@@ -249,7 +274,10 @@ mod tests {
     #[test]
     fn drops_self_edges() {
         let symbols = vec![sym("foo", "m::foo")];
-        let raw = vec![RawRef { from: "m::foo".into(), name: "foo".into() }];
+        let raw = vec![RawRef {
+            from: "m::foo".into(),
+            name: "foo".into(),
+        }];
         assert!(resolve_refs(&symbols, raw).is_empty());
     }
 }

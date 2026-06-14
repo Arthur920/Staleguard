@@ -6,13 +6,13 @@ mod commands;
 mod config;
 mod coverage;
 mod diagram;
-mod entrypoints;
 mod drift;
+mod entrypoints;
+#[cfg(feature = "ml")]
+mod evidence;
 mod extract;
 mod findings;
 mod git;
-#[cfg(feature = "ml")]
-mod evidence;
 #[cfg(feature = "ml")]
 mod judge;
 #[cfg(feature = "ml")]
@@ -161,7 +161,9 @@ pub(crate) fn collect_docs_filtered(root: &Path, filter: &[String]) -> Vec<PathB
                 return true;
             }
             let rel = p.strip_prefix(root).unwrap_or(p).to_string_lossy();
-            filter.iter().any(|f| rel == f.as_str() || rel.ends_with(f.as_str()))
+            filter
+                .iter()
+                .any(|f| rel == f.as_str() || rel.ends_with(f.as_str()))
         })
         .collect()
 }
@@ -193,19 +195,31 @@ pub(crate) fn is_changelog_doc(path: &Path) -> bool {
     // Towncrier-style fragment directories: `changes/`, `changelog.d/`, `news.d/`.
     path.components().any(|c| {
         matches!(
-            c.as_os_str().to_str().map(str::to_ascii_lowercase).as_deref(),
-            Some("changes") | Some("changelog.d") | Some("changelog") | Some("news.d") | Some("newsfragments")
+            c.as_os_str()
+                .to_str()
+                .map(str::to_ascii_lowercase)
+                .as_deref(),
+            Some("changes")
+                | Some("changelog.d")
+                | Some("changelog")
+                | Some("news.d")
+                | Some("newsfragments")
         )
     })
 }
 
-fn run_check(root: &Path, opts: &drift::Options, layer: u8, doc_filter: &[String]) -> drift::Outcome {
+fn run_check(
+    root: &Path,
+    opts: &drift::Options,
+    layer: u8,
+    doc_filter: &[String],
+) -> drift::Outcome {
     let _ = layer; // consulted only in `ml` builds for the Layer 3 judge.
-    // `--doc` scoping: restrict every doc-derived pass to the named docs and skip
-    // the repo-wide coverage/history passes (which answer "what code is
-    // undocumented", a whole-repo question that a single-doc check doesn't ask).
-    // This is what makes a scoped run cheap: no 1000-commit history parse, no
-    // coverage ranking, and the Layer-3 judge only sees the target doc's claims.
+                   // `--doc` scoping: restrict every doc-derived pass to the named docs and skip
+                   // the repo-wide coverage/history passes (which answer "what code is
+                   // undocumented", a whole-repo question that a single-doc check doesn't ask).
+                   // This is what makes a scoped run cheap: no 1000-commit history parse, no
+                   // coverage ranking, and the Layer-3 judge only sees the target doc's claims.
     let scoped = !doc_filter.is_empty();
     // Repo-wide grounding, built once and shared across every doc.
     let index = CodeIndex::build(root);
@@ -361,9 +375,7 @@ fn report_check(out: &drift::Outcome, format: Format) {
                 out.score.repo, out.total_claims, out.carried_forward
             );
             if let Some((base, head)) = out.regression {
-                println!(
-                    "\u{2717} score regressed: {base:.3} (base) -> {head:.3} (head)"
-                );
+                println!("\u{2717} score regressed: {base:.3} (base) -> {head:.3} (head)");
             }
         }
     }
