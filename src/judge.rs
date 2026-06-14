@@ -1,11 +1,13 @@
 //! Layer 3 verification: an NLI cross-encoder as the coherence judge.
 //!
-//! **Status: EXPERIMENTAL — not reliable for verdicts.** The judge is a *text*-NLI
-//! model (`nli-deberta-v3-xsmall`, trained on MNLI/SNLI) but the premise is *raw
-//! code*, which is out-of-distribution: it emits overconfident (0.90–1.00) false
-//! contradictions on genuine claims. The claim-extraction and decision logic here
-//! are sound (and isolate the failure to the model); the fix is a code-aware NLI
-//! head — drop it in via `SHLOMES_NLI_REPO` once trained. Until then ship Layer 1.
+//! The judge is a **code-aware** NLI cross-encoder: `code-doc-coherence-shlomes`,
+//! a `microsoft/unixcoder-base` fine-tune over `(code premise, prose claim)` pairs
+//! that predicts `{entailment, neutral, contradiction}`. UniXcoder's code-aware
+//! pretraining keeps real code *in*-distribution as the premise, which is exactly
+//! the failure mode a text-NLI model (MNLI/SNLI on prose) hit — overconfident
+//! false contradictions on genuine claims. The model is overridable via
+//! `SHLOMES_NLI_REPO` (a HF repo id *or* a local directory), with `SHLOMES_NLI_ONNX`
+//! / `SHLOMES_NLI_THRESHOLD` / `SHLOMES_NLI_MARGIN` for the artifact and decision knobs.
 //!
 //! For doc claims that survive the deterministic layers (behavioural prose like
 //! "the cache invalidates on write"), Layer 2 retrieves the most relevant code
@@ -17,10 +19,8 @@
 //!
 //! It is a *classifier*, not a generative LLM — no API, no per-token cost, code
 //! never leaves the machine. The model is an int8-quantized ONNX
-//! (`nli-deberta-v3-xsmall`, ~20 MB) loaded via `ort`, mirroring the offline
-//! model-download path Layer 2 already uses. Repo, ONNX file, and the decision
-//! threshold are overridable via `SHLOMES_NLI_REPO`, `SHLOMES_NLI_ONNX`, and
-//! `SHLOMES_NLI_THRESHOLD`.
+//! (`model_quantized.onnx`, ~121 MB) loaded via `ort`, mirroring the offline
+//! model-download path Layer 2 already uses.
 //!
 //! Unlike embeddings, a cross-encoder can separate `supported` from
 //! `contradicted`: negation ("does X" vs "does *not* X") barely moves an
@@ -45,8 +45,8 @@ use crate::code::CodeIndex;
 use crate::findings::{Finding, Verdict};
 use crate::retrieve;
 
-const DEFAULT_REPO: &str = "Xenova/nli-deberta-v3-xsmall";
-const DEFAULT_ONNX: &str = "onnx/model_quantized.onnx";
+const DEFAULT_REPO: &str = "Arthur920/code-doc-coherence-shlomes";
+const DEFAULT_ONNX: &str = "model_quantized.onnx";
 const DEFAULT_THRESHOLD: f32 = 0.5;
 /// How far contradiction must out-score entailment *within a single evidence
 /// chunk* before that chunk counts as contradicting. Guards against the OOD
@@ -134,10 +134,20 @@ impl Judge {
             .and_then(|s| s.parse().ok())
             .unwrap_or(DEFAULT_MARGIN);
 
-        let repo = Api::new()?.model(repo_name);
-        let onnx = repo.get(&onnx_rel)?;
-        let tok = repo.get("tokenizer.json")?;
-        let cfg = repo.get("config.json")?;
+        // `SHLOMES_NLI_REPO` may be a HF repo id or a local checkpoint directory
+        // (offline use, private models, CI). A path that exists on disk is loaded
+        // directly; anything else is treated as a Hub repo and fetched/cached.
+        let (onnx, tok, cfg) = if Path::new(&repo_name).is_dir() {
+            let dir = Path::new(&repo_name);
+            (
+                dir.join(&onnx_rel),
+                dir.join("tokenizer.json"),
+                dir.join("config.json"),
+            )
+        } else {
+            let repo = Api::new()?.model(repo_name);
+            (repo.get(&onnx_rel)?, repo.get("tokenizer.json")?, repo.get("config.json")?)
+        };
 
         let session = Session::builder()?
             .with_intra_threads(retrieve::ort_threads())

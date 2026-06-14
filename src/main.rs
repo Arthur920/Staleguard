@@ -69,9 +69,9 @@ enum Commands {
         #[arg(long, value_enum, default_value_t = Format::Text)]
         format: Format,
         /// Max layer: 1 deterministic (recommended), 2 +retrieval, 3 +NLI judge.
-        /// Layers 2-3 require the `ml` feature build. Layer 3 is EXPERIMENTAL: the
-        /// NLI judge is a text model reading code (out-of-distribution) and emits
-        /// overconfident false contradictions — not yet reliable for verdicts.
+        /// Layers 2-3 require the `ml` feature build. Layer 3 runs a code-aware NLI
+        /// cross-encoder (`code-doc-coherence-shlomes`, a UniXcoder fine-tune) over
+        /// the retrieved code evidence to render supported/contradicted verdicts.
         #[arg(long, default_value_t = 1)]
         layer: u8,
         /// Drift base: only re-derive claims whose code changed since this git
@@ -285,9 +285,8 @@ fn run_check(root: &Path, opts: &drift::Options, layer: u8, doc_filter: &[String
     #[cfg(feature = "ml")]
     if layer >= 3 {
         eprintln!(
-            "note: layer 3 (NLI judge) is EXPERIMENTAL — the text-NLI model reads code \
-             out-of-distribution and produces overconfident false contradictions; \
-             treat verdicts as advisory, not authoritative."
+            "note: layer 3 runs the code-aware NLI judge (code-doc-coherence-shlomes); \
+             verdicts are advisory — review contradictions before acting."
         );
         let mut claims = Vec::new();
         for doc in collect_docs_filtered(root, doc_filter) {

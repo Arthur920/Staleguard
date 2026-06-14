@@ -76,9 +76,9 @@ shlomes retrieve "where is auth handled" --k 5
   for `index`, at ~100 MB peak memory. Per-file parsing runs in parallel
   (rayon) and tree-sitter queries are compiled once and cached, so throughput
   scales with cores.
-- **Local & offline** — the jina embedding model (~160 MB) and the NLI
-  cross-encoder (`nli-deberta-v3-xsmall`, int8 ONNX ~20 MB) download once, then
-  run on-device. Code never leaves the machine.
+- **Local & offline** — the jina embedding model (~160 MB) and the code-aware
+  NLI cross-encoder (`code-doc-coherence-shlomes`, a UniXcoder fine-tune, int8
+  ONNX ~121 MB) download once, then run on-device. Code never leaves the machine.
 - **Content-hash caches** — unchanged files and code chunks are free on re-run;
   the embedding model loads only when something actually needs embedding.
 - **Symbol-aligned chunking** — code is chunked on tree-sitter symbol boundaries
