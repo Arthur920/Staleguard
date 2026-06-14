@@ -11,7 +11,7 @@ fn tmp(tag: &str) -> std::path::PathBuf {
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_nanos();
-    let dir = std::env::temp_dir().join(format!("shlomes-drift-{tag}-{nanos}"));
+    let dir = std::env::temp_dir().join(format!("staleguard-drift-{tag}-{nanos}"));
     fs::create_dir_all(&dir).unwrap();
     dir
 }
@@ -76,8 +76,8 @@ fn run_writes_ledger_and_score_and_treats_all_dirty_without_git() {
     assert_eq!(out.findings[0].verdict, Verdict::Stale);
 
     // Artifacts written.
-    assert!(dir.join(".shlomes/ledger.json").exists());
-    assert!(dir.join(".shlomes/score.json").exists());
+    assert!(dir.join(".staleguard/ledger.json").exists());
+    assert!(dir.join(".staleguard/score.json").exists());
     let reloaded = Score::load(&dir).unwrap();
     // supported credit 1 / (1 + stale 2) = 1/3.
     assert!(

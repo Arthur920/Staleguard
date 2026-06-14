@@ -5,7 +5,7 @@
 //! the tree-sitter index (falling back to overlapping line windows for files
 //! with no extractable symbols), embedded, and queried by cosine similarity.
 //!
-//! Embeddings are cached on disk under `.shlomes/` keyed by a content hash, so
+//! Embeddings are cached on disk under `.staleguard/` keyed by a content hash, so
 //! unchanged chunks (and unchanged queries) are free on re-run; the model is
 //! only loaded when something actually needs embedding. An optional reranker
 //! ([`crate::rerank`]) sharpens the top-k before it reaches the judge.
@@ -26,7 +26,7 @@ use crate::code::CodeIndex;
 
 /// Default HuggingFace repo + the int8-quantized ONNX (162 MB vs the 642 MB fp32
 /// that fastembed's built-in `JinaEmbeddingsV2BaseCode` variant would download).
-/// Both are overridable via `SHLOMES_EMBED_REPO` / `SHLOMES_EMBED_ONNX` so the
+/// Both are overridable via `STALEGUARD_EMBED_REPO` / `STALEGUARD_EMBED_ONNX` so the
 /// embedding model can be swapped (e.g. for a smaller, faster one) without a
 /// rebuild; the on-disk cache is tagged with the repo so a swap invalidates it.
 /// A swapped model must expose the same tokenizer file layout and use mean
@@ -35,11 +35,11 @@ const DEFAULT_MODEL_REPO: &str = "jinaai/jina-embeddings-v2-base-code";
 const DEFAULT_ONNX: &str = "onnx/model_quantized.onnx";
 
 fn model_repo() -> String {
-    std::env::var("SHLOMES_EMBED_REPO").unwrap_or_else(|_| DEFAULT_MODEL_REPO.to_string())
+    std::env::var("STALEGUARD_EMBED_REPO").unwrap_or_else(|_| DEFAULT_MODEL_REPO.to_string())
 }
 
 fn model_onnx() -> String {
-    std::env::var("SHLOMES_EMBED_ONNX").unwrap_or_else(|_| DEFAULT_ONNX.to_string())
+    std::env::var("STALEGUARD_EMBED_ONNX").unwrap_or_else(|_| DEFAULT_ONNX.to_string())
 }
 
 /// Fallback line-window chunking (files with no extractable symbols).
@@ -153,7 +153,7 @@ fn collect_chunks(repo_root: &Path, index: &CodeIndex) -> Vec<Chunk> {
         // Docs describe the library's own API, so tests/benchmarks/examples are
         // noise as *evidence* — and on a real repo they are ~half the corpus, the
         // dominant embedding cost. Drop them from the retrieval set (the symbol
-        // index still sees them). Disable with `SHLOMES_EMBED_INCLUDE_TESTS=1`.
+        // index still sees them). Disable with `STALEGUARD_EMBED_INCLUDE_TESTS=1`.
         if !include_tests() && is_non_library(&rel) {
             continue;
         }
@@ -172,7 +172,7 @@ fn collect_chunks(repo_root: &Path, index: &CodeIndex) -> Vec<Chunk> {
 }
 
 fn include_tests() -> bool {
-    std::env::var_os("SHLOMES_EMBED_INCLUDE_TESTS").is_some()
+    std::env::var_os("STALEGUARD_EMBED_INCLUDE_TESTS").is_some()
 }
 
 /// Heuristic: is this a test / benchmark / example file (not library code the
@@ -226,7 +226,7 @@ struct EmbedCache {
 
 impl EmbedCache {
     fn path(repo_root: &Path) -> PathBuf {
-        repo_root.join(".shlomes").join("embeddings.json")
+        repo_root.join(".staleguard").join("embeddings.json")
     }
 
     fn load(repo_root: &Path) -> EmbedCache {
@@ -310,8 +310,8 @@ fn new_model() -> Result<TextEmbedding> {
     // member and runs batches sequentially, so on a CPU the per-run cost scales
     // with this length. Code chunks carry their retrieval signal (signature +
     // opening lines) well within ~128 tokens; the default 512 quadruples the work
-    // for no recall gain. Overridable via `SHLOMES_EMBED_MAX_TOKENS`.
-    let max_tokens = std::env::var("SHLOMES_EMBED_MAX_TOKENS")
+    // for no recall gain. Overridable via `STALEGUARD_EMBED_MAX_TOKENS`.
+    let max_tokens = std::env::var("STALEGUARD_EMBED_MAX_TOKENS")
         .ok()
         .and_then(|s| s.parse().ok())
         .unwrap_or(128);
@@ -319,22 +319,22 @@ fn new_model() -> Result<TextEmbedding> {
         .with_max_length(max_tokens)
         // fastembed runs batches sequentially, so ONNX intra-op threads are the
         // only parallelism for embedding. Default leaves cores idle (~4/10 here);
-        // pin it to all available cores. Overridable via `SHLOMES_ORT_THREADS`.
+        // pin it to all available cores. Overridable via `STALEGUARD_ORT_THREADS`.
         .with_intra_threads(ort_threads());
     TextEmbedding::try_new_from_user_defined(model, opts)
 }
 
 /// Fetch (and cache) the embedding model so the first real run is offline.
 /// Triggers the Hub download and a full load, surfacing any auth/network error
-/// up front. Used by `shlomes setup`.
+/// up front. Used by `staleguard setup`.
 pub fn prefetch_model() -> Result<()> {
     new_model()?;
     Ok(())
 }
 
-/// ONNX intra-op thread count: `SHLOMES_ORT_THREADS` if set, else every core.
+/// ONNX intra-op thread count: `STALEGUARD_ORT_THREADS` if set, else every core.
 pub(crate) fn ort_threads() -> usize {
-    std::env::var("SHLOMES_ORT_THREADS")
+    std::env::var("STALEGUARD_ORT_THREADS")
         .ok()
         .and_then(|s| s.parse().ok())
         .filter(|&n| n > 0)

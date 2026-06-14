@@ -42,7 +42,7 @@ const TOLERANCE: f64 = 1e-9;
 pub struct Options {
     /// Explicit diff base; defaults to the ledger's last commit.
     pub diff_ref: Option<String>,
-    /// Persist the updated ledger + score under `.shlomes/`.
+    /// Persist the updated ledger + score under `.staleguard/`.
     pub write_ledger: bool,
     /// Fail (return a regression) if the repo score dropped below the committed
     /// base score.

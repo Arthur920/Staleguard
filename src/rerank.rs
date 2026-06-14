@@ -3,9 +3,9 @@
 //! reaches the Layer 3 judge.
 //!
 //! Unlike the embedding model this is *opt-in*: it loads only when
-//! `SHLOMES_RERANK_REPO` is set (e.g. a ms-marco MiniLM or bge-reranker ONNX),
+//! `STALEGUARD_RERANK_REPO` is set (e.g. a ms-marco MiniLM or bge-reranker ONNX),
 //! so the default retrieval path stays a single model download. ONNX file and
-//! repo are overridable via `SHLOMES_RERANK_ONNX` / `SHLOMES_RERANK_REPO`.
+//! repo are overridable via `STALEGUARD_RERANK_ONNX` / `STALEGUARD_RERANK_REPO`.
 //!
 //! A reranker is a single-logit cross-encoder (relevance score), so this reuses
 //! the [`crate::judge`] ort plumbing but reads one output value instead of a
@@ -30,13 +30,13 @@ pub struct Reranker {
 }
 
 impl Reranker {
-    /// Load the reranker iff `SHLOMES_RERANK_REPO` is set; otherwise `None`.
+    /// Load the reranker iff `STALEGUARD_RERANK_REPO` is set; otherwise `None`.
     pub fn from_env() -> Result<Option<Reranker>> {
-        let Ok(repo_name) = std::env::var("SHLOMES_RERANK_REPO") else {
+        let Ok(repo_name) = std::env::var("STALEGUARD_RERANK_REPO") else {
             return Ok(None);
         };
         let onnx_rel =
-            std::env::var("SHLOMES_RERANK_ONNX").unwrap_or_else(|_| DEFAULT_ONNX.to_string());
+            std::env::var("STALEGUARD_RERANK_ONNX").unwrap_or_else(|_| DEFAULT_ONNX.to_string());
 
         let repo = Api::new()?.model(repo_name);
         let onnx = repo.get(&onnx_rel)?;

@@ -1,4 +1,4 @@
-//! The committed claim ledger and alignment-score artifacts (`.shlomes/`).
+//! The committed claim ledger and alignment-score artifacts (`.staleguard/`).
 //!
 //! Both are facts-only JSON (no embeddings), so they are commit-safe and
 //! merge-friendly. The ledger carries one [`ClaimRecord`] per claim across runs;
@@ -15,7 +15,7 @@ use crate::code::symbol::Facts;
 use crate::findings::Verdict;
 
 /// Directory holding the committed drift artifacts.
-pub const DIR: &str = ".shlomes";
+pub const DIR: &str = ".staleguard";
 
 fn ledger_path(root: &Path) -> PathBuf {
     root.join(DIR).join("ledger.json")
@@ -70,7 +70,7 @@ impl Ledger {
         self.claims.get(id)
     }
 
-    /// Persist the ledger under `.shlomes/` (created on demand).
+    /// Persist the ledger under `.staleguard/` (created on demand).
     pub fn save(&self, root: &Path) -> std::io::Result<()> {
         let dir = root.join(DIR);
         std::fs::create_dir_all(&dir)?;

@@ -402,7 +402,7 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let dir = std::env::temp_dir().join(format!("shlomes-cmd-{tag}-{nanos}"));
+        let dir = std::env::temp_dir().join(format!("staleguard-cmd-{tag}-{nanos}"));
         fs::create_dir_all(&dir).unwrap();
         dir
     }
@@ -476,13 +476,13 @@ mod tests {
         let dir = scratch("cargo");
         fs::write(
             dir.join("Cargo.toml"),
-            "[package]\nname = \"shlomes\"\n\n[[bin]]\nname = \"shlomes\"\n",
+            "[package]\nname = \"staleguard\"\n\n[[bin]]\nname = \"staleguard\"\n",
         )
         .unwrap();
         fs::create_dir_all(dir.join("src")).unwrap();
         fs::write(dir.join("src/main.rs"), "fn main() {}\n").unwrap();
         let m = Manifests::load(&dir);
-        let md = "`cargo run --bin shlomes` works; `cargo run --bin ghost` does not.";
+        let md = "`cargo run --bin staleguard` works; `cargo run --bin ghost` does not.";
         let flagged: Vec<String> = check(md, "README.md", &m)
             .iter()
             .filter(|f| f.verdict.is_reportable())
@@ -527,12 +527,12 @@ mod tests {
         let dir = scratch("bins");
         fs::write(
             dir.join("Cargo.toml"),
-            "[package]\nname = \"shlomes\"\n\n[[bin]]\nname = \"shlomes\"\n",
+            "[package]\nname = \"staleguard\"\n\n[[bin]]\nname = \"staleguard\"\n",
         )
         .unwrap();
         fs::create_dir_all(dir.join("src")).unwrap();
         fs::write(dir.join("src/main.rs"), "fn main() {}\n").unwrap();
         let m = Manifests::load(&dir);
-        assert!(m.project_bins().contains("shlomes"));
+        assert!(m.project_bins().contains("staleguard"));
     }
 }

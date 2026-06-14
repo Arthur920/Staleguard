@@ -369,7 +369,7 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let dir = std::env::temp_dir().join(format!("shlomes-cov-{nanos}"));
+        let dir = std::env::temp_dir().join(format!("staleguard-cov-{nanos}"));
         fs::create_dir_all(dir.join("src")).unwrap();
         fs::write(
             dir.join("src/lib.rs"),

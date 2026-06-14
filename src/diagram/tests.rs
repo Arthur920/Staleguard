@@ -189,7 +189,7 @@ fn class_and_sequence_ground_against_a_real_index() {
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_nanos();
-    let dir = std::env::temp_dir().join(format!("shlomes-dogfood-{nanos}"));
+    let dir = std::env::temp_dir().join(format!("staleguard-dogfood-{nanos}"));
     fs::create_dir_all(dir.join("src")).unwrap();
     fs::write(
         dir.join("src/svc.rs"),

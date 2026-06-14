@@ -1,11 +1,11 @@
 <p align="center">
-  <img src="shlomes.png" alt="shlomes logo" width="320">
+  <img src="staleguard.png" alt="Staleguard logo" width="320">
 </p>
 
-# shlomes
+# Staleguard
 
 Catch **documentation drift** — places where your `CLAUDE.md`, READMEs, and
-`*.md` docs claim something the code no longer backs up. shlomes checks docs
+`*.md` docs claim something the code no longer backs up. Staleguard checks docs
 against the actual codebase and reports what's stale, wrong, or missing.
 
 Fully local and offline. The deterministic core needs no model and is tuned for
@@ -38,35 +38,35 @@ cargo install --path .
 
 # All layers (downloads the Layer 2/3 models on setup):
 cargo install --path . --features ml
-shlomes setup        # fetch + load every model, fully offline thereafter
+staleguard setup        # fetch + load every model, fully offline thereafter
 ```
 
-`shlomes setup` prepares all layers and surfaces any model download error up
+`staleguard setup` prepares all layers and surfaces any model download error up
 front. Then:
 
 ```bash
-shlomes check                 # full repo (Layer 1)
-shlomes check --layer 3       # all three layers
+staleguard check                 # full repo (Layer 1)
+staleguard check --layer 3       # all three layers
 ```
 
 The Layer 3 judge is the
-[`code-doc-coherence-shlomes`](https://huggingface.co/Arthur920/code-doc-coherence-shlomes)
+[`code-doc-coherence-staleguard`](https://huggingface.co/Arthur920/code-doc-coherence-staleguard)
 model on Hugging Face (a `microsoft/unixcoder-base` fine-tune); it downloads on
-`setup` / first run. Override any model or threshold via `SHLOMES_*` env vars —
+`setup` / first run. Override any model or threshold via `STALEGUARD_*` env vars —
 see [DETAILS.md](DETAILS.md#environment-overrides).
 
 ## CI integration
 
-`shlomes check` exits non-zero on any finding or a score regression, so it drops
+`staleguard check` exits non-zero on any finding or a score regression, so it drops
 straight into a pipeline. Commit a baseline on your main branch, then gate PRs
 against it:
 
 ```bash
-# once, on the base branch — records the alignment baseline under .shlomes/
-shlomes check --write-ledger
+# once, on the base branch — records the alignment baseline under .staleguard/
+staleguard check --write-ledger
 
 # in CI on each PR — fail only if alignment regressed below the baseline
-shlomes check --fail-on-regression
+staleguard check --fail-on-regression
 ```
 
 Example GitHub Actions step:
@@ -75,30 +75,30 @@ Example GitHub Actions step:
 - name: doc-coherence
   run: |
     cargo install --path .          # Layer 1 is fast and dependency-light
-    shlomes check --fail-on-regression --format json
+    staleguard check --fail-on-regression --format json
 ```
 
-For behavioral checks in CI, build `--features ml` and run `shlomes setup` (cache
+For behavioral checks in CI, build `--features ml` and run `staleguard setup` (cache
 the model download between runs).
 
 ## Use it in AI-assisted coding (MCP / agents)
 
-shlomes is a CLI with `--format json`, so any coding agent can run it and read
+Staleguard is a CLI with `--format json`, so any coding agent can run it and read
 the findings back. Two ways to wire it in:
 
 **1. As a tool the agent runs directly.** In Claude Code (or any agent with shell
 access), just let it call:
 
 ```bash
-shlomes check --format json --diff main
+staleguard check --format json --diff main
 ```
 
 A good standing instruction in `CLAUDE.md`: *"After editing code or docs, run
-`shlomes check --format json` and fix any reported drift before finishing."*
+`staleguard check --format json` and fix any reported drift before finishing."*
 
-**2. As an MCP server.** Expose shlomes over the Model Context Protocol with a
+**2. As an MCP server.** Expose staleguard over the Model Context Protocol with a
 thin command-runner MCP (e.g. a generic "run this CLI" server), mapping a
-`check_doc_drift` tool to `shlomes check --format json`. The agent then calls the
+`check_doc_drift` tool to `staleguard check --format json`. The agent then calls the
 tool and receives the structured findings as context — no shell access needed.
 The JSON output (one object per finding: layer, verdict, doc ref, code anchor,
 detail) is the contract to map onto MCP tool results.
@@ -109,7 +109,7 @@ findings back as fixes.
 ## Build
 
 ```bash
-cargo build                          # debug binary at target/debug/shlomes
+cargo build                          # debug binary at target/debug/staleguard
 cargo test                           # unit tests
 cargo build --features ml            # with Layers 2-3
 cargo run --features ml -- check --layer 3

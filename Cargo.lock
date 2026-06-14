@@ -2337,31 +2337,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f8fadd59c855ef2080decdef8ff161eb6661b86933c9d82e5ba29dc602a55aba"
 
 [[package]]
-name = "shlomes"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "clap",
- "fastembed",
- "hf-hub",
- "ort",
- "rayon",
- "regex",
- "serde",
- "serde_json",
- "streaming-iterator",
- "tokenizers",
- "tree-sitter",
- "tree-sitter-java",
- "tree-sitter-javascript",
- "tree-sitter-python",
- "tree-sitter-rust",
- "tree-sitter-tags",
- "tree-sitter-typescript",
- "walkdir",
-]
-
-[[package]]
 name = "simd-adler32"
 version = "0.3.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2426,6 +2401,31 @@ name = "stable_deref_trait"
 version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6ce2be8dc25455e1f91df71bfa12ad37d7af1092ae736f3a6cd0e37bc7810596"
+
+[[package]]
+name = "staleguard"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "fastembed",
+ "hf-hub",
+ "ort",
+ "rayon",
+ "regex",
+ "serde",
+ "serde_json",
+ "streaming-iterator",
+ "tokenizers",
+ "tree-sitter",
+ "tree-sitter-java",
+ "tree-sitter-javascript",
+ "tree-sitter-python",
+ "tree-sitter-rust",
+ "tree-sitter-tags",
+ "tree-sitter-typescript",
+ "walkdir",
+]
 
 [[package]]
 name = "static_assertions"

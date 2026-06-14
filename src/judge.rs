@@ -1,13 +1,13 @@
 //! Layer 3 verification: an NLI cross-encoder as the coherence judge.
 //!
-//! The judge is a **code-aware** NLI cross-encoder: `code-doc-coherence-shlomes`,
+//! The judge is a **code-aware** NLI cross-encoder: `code-doc-coherence-staleguard`,
 //! a `microsoft/unixcoder-base` fine-tune over `(code premise, prose claim)` pairs
 //! that predicts `{entailment, neutral, contradiction}`. UniXcoder's code-aware
 //! pretraining keeps real code *in*-distribution as the premise, which is exactly
 //! the failure mode a text-NLI model (MNLI/SNLI on prose) hit — overconfident
 //! false contradictions on genuine claims. The model is overridable via
-//! `SHLOMES_NLI_REPO`, with `SHLOMES_NLI_ONNX` / `SHLOMES_NLI_THRESHOLD` /
-//! `SHLOMES_NLI_MARGIN` for the artifact and decision knobs.
+//! `STALEGUARD_NLI_REPO`, with `STALEGUARD_NLI_ONNX` / `STALEGUARD_NLI_THRESHOLD` /
+//! `STALEGUARD_NLI_MARGIN` for the artifact and decision knobs.
 //!
 //! For doc claims that survive the deterministic layers (behavioural prose like
 //! "the cache invalidates on write"), Layer 2 retrieves the most relevant code
@@ -45,13 +45,13 @@ use crate::code::CodeIndex;
 use crate::findings::{Finding, Verdict};
 use crate::retrieve;
 
-const DEFAULT_REPO: &str = "Arthur920/code-doc-coherence-shlomes";
+const DEFAULT_REPO: &str = "Arthur920/code-doc-coherence-staleguard";
 const DEFAULT_ONNX: &str = "model_quantized.onnx";
 const DEFAULT_THRESHOLD: f32 = 0.5;
 /// How far contradiction must out-score entailment *within a single evidence
 /// chunk* before that chunk counts as contradicting. Guards against the OOD
 /// failure mode where a text-NLI model, fed code it never trained on, scatters
-/// near-equal mass onto contradiction and entailment. Override: `SHLOMES_NLI_MARGIN`.
+/// near-equal mass onto contradiction and entailment. Override: `STALEGUARD_NLI_MARGIN`.
 const DEFAULT_MARGIN: f32 = 0.15;
 const MAX_TOKENS: usize = 256;
 
@@ -61,12 +61,12 @@ pub const EVIDENCE_K: usize = 5;
 /// (claim, evidence) pair, so this bounds model cost. See [`max_claims`].
 pub const DEFAULT_MAX_CLAIMS: usize = 300;
 
-/// Upper bound on prose claims judged per run, from `SHLOMES_NLI_MAX_CLAIMS`
+/// Upper bound on prose claims judged per run, from `STALEGUARD_NLI_MAX_CLAIMS`
 /// (default [`DEFAULT_MAX_CLAIMS`]). `0` means no cap — judge every candidate
 /// claim, trading runtime for coverage. The judge cost is ~linear in this, so
 /// it's the main knob for the Layer-3 time/coverage trade-off.
 pub fn max_claims() -> usize {
-    std::env::var("SHLOMES_NLI_MAX_CLAIMS")
+    std::env::var("STALEGUARD_NLI_MAX_CLAIMS")
         .ok()
         .and_then(|s| s.parse().ok())
         .unwrap_or(DEFAULT_MAX_CLAIMS)
@@ -138,13 +138,13 @@ pub struct Judge {
 impl Judge {
     /// Fetch (once, then cached) and load the NLI model, tokenizer, and label map.
     pub fn load() -> Result<Judge> {
-        let repo_name = env_or("SHLOMES_NLI_REPO", DEFAULT_REPO);
-        let onnx_rel = env_or("SHLOMES_NLI_ONNX", DEFAULT_ONNX);
-        let threshold = std::env::var("SHLOMES_NLI_THRESHOLD")
+        let repo_name = env_or("STALEGUARD_NLI_REPO", DEFAULT_REPO);
+        let onnx_rel = env_or("STALEGUARD_NLI_ONNX", DEFAULT_ONNX);
+        let threshold = std::env::var("STALEGUARD_NLI_THRESHOLD")
             .ok()
             .and_then(|s| s.parse().ok())
             .unwrap_or(DEFAULT_THRESHOLD);
-        let margin = std::env::var("SHLOMES_NLI_MARGIN")
+        let margin = std::env::var("STALEGUARD_NLI_MARGIN")
             .ok()
             .and_then(|s| s.parse().ok())
             .unwrap_or(DEFAULT_MARGIN);
@@ -308,11 +308,11 @@ pub fn check(
     }
 
     // Evidence selection. Default: Layer-1 grounding + a model-free lexical
-    // fallback ([`crate::evidence`]) — no corpus embedding. `SHLOMES_EMBED_RETRIEVE`
+    // fallback ([`crate::evidence`]) — no corpus embedding. `STALEGUARD_EMBED_RETRIEVE`
     // restores the embedding retriever. Each entry is (text, path, start_line).
     let t = std::time::Instant::now();
     let per_claim: Vec<Vec<(String, String, usize)>> =
-        if std::env::var_os("SHLOMES_EMBED_RETRIEVE").is_some() {
+        if std::env::var_os("STALEGUARD_EMBED_RETRIEVE").is_some() {
             let texts: Vec<String> = claims.iter().map(|c| c.text.clone()).collect();
             retrieve::retrieve(root, index, &texts, k)?
                 .into_iter()
@@ -389,9 +389,9 @@ pub fn check(
     Ok(findings)
 }
 
-/// Print elapsed time for a phase when `SHLOMES_TIMING` is set; no-op otherwise.
+/// Print elapsed time for a phase when `STALEGUARD_TIMING` is set; no-op otherwise.
 pub(crate) fn timing(label: impl AsRef<str>, since: std::time::Instant) {
-    if std::env::var_os("SHLOMES_TIMING").is_some() {
+    if std::env::var_os("STALEGUARD_TIMING").is_some() {
         eprintln!(
             "[timing] {}: {:.2}s",
             label.as_ref(),

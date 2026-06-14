@@ -1,9 +1,9 @@
 # Rust
 /target/
 
-# shlomes cache
-.shlomes/
-.shlomes-cache/
+# staleguard cache
+.staleguard/
+.staleguard-cache/
 
 # fastembed model cache (downloaded ONNX models, hundreds of MB)
 .fastembed_cache/

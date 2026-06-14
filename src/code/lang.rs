@@ -34,7 +34,7 @@ pub const CODE_EXTS: &[&str] = &[
 pub const SKIP_DIRS: &[&str] = &[
     ".git",
     "target",
-    ".shlomes",
+    ".staleguard",
     "node_modules",
     ".venv",
     "venv",

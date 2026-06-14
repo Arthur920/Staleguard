@@ -1,4 +1,4 @@
-//! shlomes command-line entry point.
+//! staleguard command-line entry point.
 
 mod claim;
 mod code;
@@ -35,7 +35,7 @@ use crate::findings::Finding;
 
 #[derive(Parser)]
 #[command(
-    name = "shlomes",
+    name = "staleguard",
     version,
     about = "Check CLAUDE.md, project docs, and code against each other for coherence drift.",
     after_help = EXAMPLES
@@ -45,18 +45,18 @@ struct Cli {
     command: Commands,
 }
 
-/// Worked examples appended to `shlomes --help`.
+/// Worked examples appended to `staleguard --help`.
 const EXAMPLES: &str = "\
 Examples:
-  shlomes check                  full repo, deterministic (layer 1)
-  shlomes check --diff main      only re-check what changed vs main
-  shlomes check --format json    machine-readable findings (exits non-zero on drift)
-  shlomes check --write-ledger   set the CI alignment baseline on the base branch
-  shlomes index                  print code symbols + module/reference edges
-  shlomes coverage               public code surface no doc describes
+  staleguard check                  full repo, deterministic (layer 1)
+  staleguard check --diff main      only re-check what changed vs main
+  staleguard check --format json    machine-readable findings (exits non-zero on drift)
+  staleguard check --write-ledger   set the CI alignment baseline on the base branch
+  staleguard index                  print code symbols + module/reference edges
+  staleguard coverage               public code surface no doc describes
 
-Layers 2-3 (retrieval + NLI judge) need the `ml` build; see `shlomes check --help`.
-Run `shlomes <command> --help` for per-command options.";
+Layers 2-3 (retrieval + NLI judge) need the `ml` build; see `staleguard check --help`.
+Run `staleguard <command> --help` for per-command options.";
 
 #[derive(Subcommand)]
 enum Commands {
@@ -70,7 +70,7 @@ enum Commands {
         format: Format,
         /// Max layer: 1 deterministic (recommended), 2 +retrieval, 3 +NLI judge.
         /// Layers 2-3 require the `ml` feature build. Layer 3 runs a code-aware NLI
-        /// cross-encoder (`code-doc-coherence-shlomes`, a UniXcoder fine-tune) over
+        /// cross-encoder (`code-doc-coherence-staleguard`, a UniXcoder fine-tune) over
         /// the retrieved code evidence to render supported/contradicted verdicts.
         #[arg(long, default_value_t = 1)]
         layer: u8,
@@ -78,7 +78,7 @@ enum Commands {
         /// ref (default: the committed ledger's last commit).
         #[arg(long)]
         diff: Option<String>,
-        /// Persist the drift ledger + alignment score under `.shlomes/` (run this
+        /// Persist the drift ledger + alignment score under `.staleguard/` (run this
         /// on the base branch to set the CI baseline).
         #[arg(long)]
         write_ledger: bool,
@@ -303,7 +303,7 @@ fn run_check(
     #[cfg(feature = "ml")]
     if layer >= 3 {
         eprintln!(
-            "note: layer 3 runs the code-aware NLI judge (code-doc-coherence-shlomes); \
+            "note: layer 3 runs the code-aware NLI judge (code-doc-coherence-staleguard); \
              verdicts are advisory — review contradictions before acting."
         );
         let mut claims = Vec::new();
@@ -413,7 +413,7 @@ fn report_index(index: &CodeIndex, format: Format) {
     }
 }
 
-/// `shlomes setup`: ensure every layer is ready to run. Layer 1 is always
+/// `staleguard setup`: ensure every layer is ready to run. Layer 1 is always
 /// available; in the `ml` build this fetches and loads the Layer 2 embedding
 /// model and the Layer 3 NLI judge so the first real `check --layer 3` is fully
 /// offline (and any model auth/network error surfaces here, not mid-run).
@@ -449,7 +449,7 @@ fn run_setup() -> ExitCode {
             return ExitCode::FAILURE;
         }
         println!("ready.");
-        println!("All layers ready. Run `shlomes check --layer 3`.");
+        println!("All layers ready. Run `staleguard check --layer 3`.");
         ExitCode::SUCCESS
     }
 }

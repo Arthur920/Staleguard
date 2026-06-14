@@ -8,7 +8,7 @@
 //! (idf-weighted) match over the public symbol table when a claim grounded to
 //! nothing. No embedding model, no whole-corpus pass.
 //!
-//! Embedding stays available behind `SHLOMES_EMBED_RETRIEVE=1` for claims whose
+//! Embedding stays available behind `STALEGUARD_EMBED_RETRIEVE=1` for claims whose
 //! relevant code is genuinely semantic (named by behaviour, not by identifier).
 
 use std::collections::HashMap;

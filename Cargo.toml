@@ -1,5 +1,5 @@
 [package]
-name = "shlomes"
+name = "staleguard"
 version = "0.1.0"
 edition = "2021"
 description = "Sanity-check CLAUDE.md, project docs, and code against each other for coherence drift."
@@ -7,7 +7,7 @@ license = "MIT"
 readme = "README.md"
 
 [[bin]]
-name = "shlomes"
+name = "staleguard"
 path = "src/main.rs"
 
 [features]

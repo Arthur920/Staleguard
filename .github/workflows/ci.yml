@@ -39,7 +39,7 @@ jobs:
         run: cargo build --features ml
 
   doc-coherence:
-    name: shlomes self-check (Layer 1)
+    name: staleguard self-check (Layer 1)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -50,14 +50,14 @@ jobs:
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
 
-      - name: Install shlomes
+      - name: Install staleguard
         run: cargo install --path .
 
-      # Advisory: dogfood shlomes on its own prose docs. Scoped to the docs so it
+      # Advisory: dogfood staleguard on its own prose docs. Scoped to the docs so it
       # checks doc-vs-code drift (broken refs, contradictions, stale claims) and
       # skips the repo-wide coverage pass. Non-blocking because the docs mention
       # example filenames (package.json, CLAUDE.md) that exist in *user* repos,
       # not this one — findings are surfaced in the log without gating CI.
       - name: Check docs against code
-        run: shlomes check --doc README.md --doc DETAILS.md --format json
+        run: staleguard check --doc README.md --doc DETAILS.md --format json
         continue-on-error: true
