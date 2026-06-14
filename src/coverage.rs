@@ -4,7 +4,7 @@
 //! it starts from the code's public surface and asks whether any doc describes
 //! it. A public symbol whose name appears in no doc is an `undocumented` gap.
 //!
-//! Scope (see `docs/coverage-gaps.md`): public surface only; "documented" means
+//! Scope: public surface only; "documented" means
 //! the name appears as a token anywhere in any doc (loose presence, fewest false
 //! positives). Gaps are never suppressed — they are **risk-ranked** by a
 //! composite of fan-in, churn, branch-count, and a net-new (no-co-changed-doc)

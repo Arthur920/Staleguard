@@ -1,7 +1,7 @@
 //! Layer 0 drift pipeline: lineage, carry-forward, behavioral-fact drift flag,
 //! and the alignment score. Runs *after* the deterministic checks have produced
 //! their claims (each a [`Finding`], `Supported` included), enriching them with
-//! git + the committed ledger. Implements `docs/drift-detection.md` steps 1–7.
+//! git + the committed ledger.
 //!
 //! Degrades safely: with no git or no baseline every claim is treated as dirty
 //! (a full scan), so the layer never suppresses a real finding.

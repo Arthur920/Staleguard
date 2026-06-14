@@ -6,8 +6,8 @@
 //! pretraining keeps real code *in*-distribution as the premise, which is exactly
 //! the failure mode a text-NLI model (MNLI/SNLI on prose) hit — overconfident
 //! false contradictions on genuine claims. The model is overridable via
-//! `SHLOMES_NLI_REPO` (a HF repo id *or* a local directory), with `SHLOMES_NLI_ONNX`
-//! / `SHLOMES_NLI_THRESHOLD` / `SHLOMES_NLI_MARGIN` for the artifact and decision knobs.
+//! `SHLOMES_NLI_REPO`, with `SHLOMES_NLI_ONNX` / `SHLOMES_NLI_THRESHOLD` /
+//! `SHLOMES_NLI_MARGIN` for the artifact and decision knobs.
 //!
 //! For doc claims that survive the deterministic layers (behavioural prose like
 //! "the cache invalidates on write"), Layer 2 retrieves the most relevant code
@@ -57,9 +57,20 @@ const MAX_TOKENS: usize = 256;
 
 /// Top-k code chunks retrieved per claim and fed to the judge as evidence.
 pub const EVIDENCE_K: usize = 5;
-/// Upper bound on prose claims judged per run — one forward pass per
-/// (claim, evidence) pair, so this bounds model cost.
-pub const MAX_CLAIMS: usize = 300;
+/// Default upper bound on prose claims judged per run — one forward pass per
+/// (claim, evidence) pair, so this bounds model cost. See [`max_claims`].
+pub const DEFAULT_MAX_CLAIMS: usize = 300;
+
+/// Upper bound on prose claims judged per run, from `SHLOMES_NLI_MAX_CLAIMS`
+/// (default [`DEFAULT_MAX_CLAIMS`]). `0` means no cap — judge every candidate
+/// claim, trading runtime for coverage. The judge cost is ~linear in this, so
+/// it's the main knob for the Layer-3 time/coverage trade-off.
+pub fn max_claims() -> usize {
+    std::env::var("SHLOMES_NLI_MAX_CLAIMS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(DEFAULT_MAX_CLAIMS)
+}
 
 /// A behavioural doc claim awaiting a Layer 3 verdict: the prose under test, its
 /// `path:line` origin, and the code [`Provenance`] its backtick tokens ground to
@@ -134,20 +145,10 @@ impl Judge {
             .and_then(|s| s.parse().ok())
             .unwrap_or(DEFAULT_MARGIN);
 
-        // `SHLOMES_NLI_REPO` may be a HF repo id or a local checkpoint directory
-        // (offline use, private models, CI). A path that exists on disk is loaded
-        // directly; anything else is treated as a Hub repo and fetched/cached.
-        let (onnx, tok, cfg) = if Path::new(&repo_name).is_dir() {
-            let dir = Path::new(&repo_name);
-            (
-                dir.join(&onnx_rel),
-                dir.join("tokenizer.json"),
-                dir.join("config.json"),
-            )
-        } else {
-            let repo = Api::new()?.model(repo_name);
-            (repo.get(&onnx_rel)?, repo.get("tokenizer.json")?, repo.get("config.json")?)
-        };
+        let repo = Api::new()?.model(repo_name);
+        let onnx = repo.get(&onnx_rel)?;
+        let tok = repo.get("tokenizer.json")?;
+        let cfg = repo.get("config.json")?;
 
         let session = Session::builder()?
             .with_intra_threads(retrieve::ort_threads())

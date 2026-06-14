@@ -2,8 +2,8 @@
 //! a definition that carry meaning — literal constants, control-flow condition
 //! texts, and the declared return shape. Hashing these (not the source text, and
 //! not an embedding) gives a fingerprint that moves on semantic edits (`3 -> 5`,
-//! `if -> if !`) but not on renames or reformatting. See `docs/drift-detection.md`
-//! (Mechanism 2).
+//! `if -> if !`) but not on renames or reformatting. This is the behavioral-fact
+//! baseline the drift ledger fingerprints against.
 
 use tree_sitter::Node;
 

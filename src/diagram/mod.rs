@@ -3,8 +3,8 @@
 //!
 //! Scope (first cut): graph-shaped diagrams only — Mermaid `graph`/`flowchart`,
 //! PlantUML component diagrams, and Graphviz DOT. Sequence/class/ER/state
-//! diagrams are recognized and skipped (they need symbol/call-graph alignment,
-//! per `docs/diagram-coherence.md`). No ML: every endpoint is grounded against
+//! diagrams are recognized and skipped (they need symbol/call-graph alignment).
+//! No ML: every endpoint is grounded against
 //! real modules with [`crate::rules::matches`] / [`crate::rules::grounded`] so we
 //! under-report rather than emit false positives.
 

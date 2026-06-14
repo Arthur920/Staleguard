@@ -78,7 +78,8 @@ shlomes retrieve "where is auth handled" --k 5
   scales with cores.
 - **Local & offline** — the jina embedding model (~160 MB) and the code-aware
   NLI cross-encoder (`code-doc-coherence-shlomes`, a UniXcoder fine-tune, int8
-  ONNX ~121 MB) download once, then run on-device. Code never leaves the machine.
+  ONNX ~121 MB) download once from the Hub, then run on-device. Code never leaves
+  the machine.
 - **Content-hash caches** — unchanged files and code chunks are free on re-run;
   the embedding model loads only when something actually needs embedding.
 - **Symbol-aligned chunking** — code is chunked on tree-sitter symbol boundaries
@@ -86,6 +87,9 @@ shlomes retrieve "where is auth handled" --k 5
 - **Lean default build** — Layer 1 pulls no ML dependencies. Embeddings and the
   judge live behind the `ml` feature.
 - Models and thresholds are overridable via `SHLOMES_NLI_*` / `SHLOMES_RERANK_*`.
+  Layer 3 is the heaviest pass (one cross-encoder forward per claim×evidence), so
+  it caps at `SHLOMES_NLI_MAX_CLAIMS` claims per run (default 300; `0` = no cap) —
+  the main time/coverage knob.
 
 ## How it works
 
@@ -129,9 +133,12 @@ Layer 1 (deterministic) builds with no extra features. Layers 2 (retrieval) and 
 - **Layer 3** (the NLI judge) is newer. The default model,
   [`code-doc-coherence-shlomes`](https://huggingface.co/Arthur920/code-doc-coherence-shlomes),
   is a `microsoft/unixcoder-base` fine-tune trained specifically for this
-  task, code-aware, so real code stays in-distribution as the premise. Treat its verdicts as advisory and review contradictions
-  before acting. The model is overridable via `SHLOMES_NLI_REPO` (a HF repo id
-  or a local checkpoint directory).
+  task — code-aware, so real code stays in-distribution as the premise (an
+  earlier text-NLI model did not, and produced overconfident false
+  contradictions). It is public on the Hub and downloads on first Layer-3 run;
+  treat its verdicts as advisory and review contradictions before acting. The
+  model is overridable via `SHLOMES_NLI_REPO`, and the per-run claim budget via
+  `SHLOMES_NLI_MAX_CLAIMS`.
 
 ## About this project
 

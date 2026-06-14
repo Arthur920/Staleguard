@@ -100,8 +100,8 @@ pub struct Symbol {
     pub facts: Facts,
     /// Callee names this definition references, in **source order** (control flow
     /// flattened, innermost-attributed). The ordered substrate sequence-diagram
-    /// alignment compares against (`docs/diagram-coherence.md`, "Ordered
-    /// diagrams"); unlike `ref_edges` it preserves order and repetition.
+    /// alignment compares against (ordered diagrams); unlike `ref_edges` it
+    /// preserves order and repetition.
     #[serde(default)]
     pub calls: Vec<String>,
     /// For an `Enum`, its variant names — the ground truth state-diagram grounding

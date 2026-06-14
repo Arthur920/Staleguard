@@ -1,5 +1,5 @@
 //! Minimal database-schema extraction — the ground truth ER-diagram coherence
-//! checks against (`docs/diagram-coherence.md`). v1 reads SQL `CREATE TABLE`
+//! checks against. v1 reads SQL `CREATE TABLE`
 //! statements from `.sql` files: the cleanest, most explicit schema source.
 //!
 //! ORM-model detection (structs/classes tagged as entities) is **deferred**: it

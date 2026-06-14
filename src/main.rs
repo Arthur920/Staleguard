@@ -299,7 +299,10 @@ fn run_check(root: &Path, opts: &drift::Options, layer: u8, doc_filter: &[String
                 claims.extend(judge::candidate_claims(&text, &rel, &index));
             }
         }
-        claims.truncate(judge::MAX_CLAIMS);
+        let cap = judge::max_claims();
+        if cap > 0 {
+            claims.truncate(cap);
+        }
         match judge::check(root, &index, &claims, judge::EVIDENCE_K) {
             Ok(mut judged) => findings.append(&mut judged),
             Err(e) => eprintln!("note: layer 3 judge skipped ({e})"),

@@ -1,7 +1,7 @@
 //! Ordered (sequence) diagram parsing: Mermaid `sequenceDiagram` and PlantUML
 //! sequence diagrams. Unlike the graph-shaped formats these are an **ordered
 //! list of messages**, so they are aligned (not set-diffed) against the code's
-//! ordered call sequence — see [`super::align`] and `docs/diagram-coherence.md`.
+//! ordered call sequence — see [`super::align`].
 //!
 //! Parsing is deliberately tolerant: a line that doesn't look like a
 //! participant declaration or an `A -> B : msg` message is skipped, so control
