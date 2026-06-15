@@ -45,7 +45,9 @@ cargo install --git https://github.com/Arthur920/Staleguard
 ```
 
 (Windows: a PowerShell installer is attached to each
-[release](https://github.com/Arthur920/Staleguard/releases).)
+[release](https://github.com/Arthur920/Staleguard/releases). Recent Homebrew
+versions prompt to trust third-party taps — run `brew trust arthur920/tap` if
+asked.)
 
 All of these give you **Layer 1** — the deterministic, zero-false-positive core,
 which needs no models. Then:
@@ -56,18 +58,28 @@ staleguard check                 # full repo (Layer 1)
 
 ### Layers 2–3 (local ML)
 
-Layers 2–3 run local ONNX models and must be built with the `ml` feature, which
-the prebuilt binaries omit (the ONNX + embedding deps are large). Build from
-source to enable them:
+Layers 2–3 run local ONNX models and need the `ml` feature, which the prebuilt
+binaries omit (the ONNX + embedding deps are large). Two ways to get an
+ml-enabled build — both compile from source, then fetch models at runtime:
 
 ```bash
+# Homebrew (compiles with the ml feature; conflicts with the plain `staleguard`)
+brew install Arthur920/tap/staleguard-ml
+
+# or with cargo
 cargo install --git https://github.com/Arthur920/Staleguard --features ml
+```
+
+Then:
+
+```bash
 staleguard setup                 # fetch + load every model, offline thereafter
 staleguard check --layer 3       # all three layers
 ```
 
 `staleguard setup` prepares all layers and surfaces any model download error up
-front.
+front. (The model files are always a runtime download — there's no separate
+"install the models" step.)
 
 The Layer 3 judge is the
 [`staleguard`](https://huggingface.co/Arthur920/staleguard)
