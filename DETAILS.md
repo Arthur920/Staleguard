@@ -14,7 +14,10 @@ profile. For setup, CI, and editor/agent integration see the [README](README.md)
 
 **Architecture violations** — rules parsed straight from prose, checked against
 the real import graph:
-- forbidden imports — "`controllers` must not import `db`"
+- forbidden imports — "`controllers` must not import `db`" (direct edge); add
+  "transitively"/"indirectly"/"reach" — "`controllers` must not transitively
+  import `db`" — to forbid *any* import chain, not just a direct one (the
+  violation names the offending path)
 - layering — "`domain` depends on nothing", "`api` may only depend on `domain`"
 - independence — "`core` is independent of `infra`"
 - forbidden symbols — "no direct `os.environ` outside `config`" (text scan +

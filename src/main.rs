@@ -53,6 +53,7 @@ Examples:
   staleguard check --format json    machine-readable findings (exits non-zero on drift)
   staleguard check --write-ledger   set the CI alignment baseline on the base branch
   staleguard index                  print code symbols + module/reference edges
+  staleguard rules                  audit architecture rules parsed from doc prose
   staleguard coverage               public code surface no doc describes
 
 Layers 2-3 (retrieval + NLI judge) need the `ml` build; see `staleguard check --help`.
@@ -94,6 +95,17 @@ enum Commands {
     },
     /// Extract and print the code index (symbols + dependency edges).
     Index {
+        /// Repo root (default: cwd).
+        #[arg(default_value = ".")]
+        path: PathBuf,
+        /// Output format.
+        #[arg(long, value_enum, default_value_t = Format::Text)]
+        format: Format,
+    },
+    /// Audit which architecture rules are extracted from doc prose, and how each
+    /// fares against the code — so silent misses (a rule that didn't parse, or an
+    /// operand that grounds to no real module) become visible.
+    Rules {
         /// Repo root (default: cwd).
         #[arg(default_value = ".")]
         path: PathBuf,
@@ -381,6 +393,102 @@ fn report_check(out: &drift::Outcome, format: Format) {
     }
 }
 
+/// Print the architecture-rule audit: every rule extracted from doc prose, where
+/// it came from, and its status (holds / violated / skipped-ungrounded). This is
+/// the visibility layer over the otherwise-silent prose extractor.
+fn report_rules(rows: &[rules::AuditRow], format: Format) {
+    match format {
+        Format::Json => {
+            let payload: Vec<_> = rows
+                .iter()
+                .map(|r| {
+                    let (status, detail) = match &r.status {
+                        rules::RuleStatus::Holds => ("holds", serde_json::Value::Null),
+                        rules::RuleStatus::Violated(n) => {
+                            ("violated", serde_json::json!({ "violations": n }))
+                        }
+                        rules::RuleStatus::Ungrounded(op) => {
+                            ("ungrounded", serde_json::json!({ "operand": op }))
+                        }
+                    };
+                    serde_json::json!({
+                        "rule": r.rule.describe(),
+                        "origin": r.origin,
+                        "status": status,
+                        "detail": detail,
+                        "experimental": r.origin.ends_with("[bare]"),
+                    })
+                })
+                .collect();
+            println!("{}", serde_json::to_string_pretty(&payload).unwrap());
+        }
+        Format::Text => {
+            if rows.is_empty() {
+                println!("no architecture rules extracted from doc prose.");
+                println!(
+                    "(rules must be written with both operands in backticks, e.g. \
+                     \"`api` must not import `db`\".)"
+                );
+                return;
+            }
+            let (mut holds, mut violated, mut ungrounded) = (0, 0, 0);
+            let mut bare = 0;
+            for r in rows {
+                let (mark, note) = match &r.status {
+                    rules::RuleStatus::Holds => {
+                        holds += 1;
+                        ("\u{2713} holds    ", String::new())
+                    }
+                    rules::RuleStatus::Violated(n) => {
+                        violated += 1;
+                        ("\u{2717} VIOLATED ", format!("  ({n} violation(s))"))
+                    }
+                    rules::RuleStatus::Ungrounded(op) => {
+                        ungrounded += 1;
+                        (
+                            "\u{26a0} skipped  ",
+                            format!("  (`{op}` matches no real module)"),
+                        )
+                    }
+                };
+                // Experimental bare-operand rules are flagged so they are never
+                // confused with the enforced (backticked) ones.
+                let tag = if r.origin.ends_with("[bare]") {
+                    bare += 1;
+                    " \u{2248}bare"
+                } else {
+                    ""
+                };
+                println!(
+                    "{}{}  {:<30}{}  [{}]",
+                    mark,
+                    tag,
+                    r.rule.describe(),
+                    note,
+                    r.origin
+                );
+            }
+            println!(
+                "\n{} rule(s): {holds} hold, {violated} violated, {ungrounded} skipped (ungrounded)",
+                rows.len()
+            );
+            if ungrounded > 0 {
+                println!(
+                    "note: skipped rules are not enforced — fix the operand name so it \
+                     matches a real module, or the rule is silently ignored."
+                );
+            }
+            if bare > 0 {
+                println!(
+                    "note: {bare} \u{2248}bare rule(s) were parsed from un-backticked prose \
+                     (experimental, grounded against the module graph). These are shown for \
+                     evaluation and are NOT enforced by `staleguard check`."
+                );
+            }
+        }
+    }
+}
+
 fn report_index(index: &CodeIndex, format: Format) {
     match format {
         Format::Json => {
@@ -497,6 +605,42 @@ fn main() -> ExitCode {
             let index = CodeIndex::build(&root);
             report_index(&index, format);
             ExitCode::SUCCESS
+        }
+        Commands::Rules { path, format } => {
+            let root = std::fs::canonicalize(&path).unwrap_or(path);
+            let index = CodeIndex::build(&root);
+            let modules = index.module_set();
+            let mut sourced = Vec::new();
+            let mut bare = Vec::new();
+            for doc in collect_docs(&root) {
+                if let Ok(text) = std::fs::read_to_string(&doc) {
+                    let rel = doc
+                        .strip_prefix(&root)
+                        .unwrap_or(&doc)
+                        .to_string_lossy()
+                        .to_string();
+                    sourced.extend(rules::extract_prose_rules(&text, &rel));
+                    bare.extend(rules::extract_bare_rules(&text, &rel, &modules));
+                }
+            }
+            // Experimental bare-operand rules (audit-only): keep only those not
+            // already captured by the backticked path, so the report shows the
+            // *additional* recall the prototype would buy.
+            let known: std::collections::HashSet<_> =
+                sourced.iter().map(|s| s.rule.clone()).collect();
+            bare.retain(|s| !known.contains(&s.rule));
+            sourced.extend(bare);
+            let rows = rules::audit(&sourced, &index, &root);
+            report_rules(&rows, format);
+            // A violated rule is real drift; exit non-zero so CI/agents notice.
+            let violated = rows
+                .iter()
+                .any(|r| matches!(r.status, rules::RuleStatus::Violated(_)));
+            if violated {
+                ExitCode::FAILURE
+            } else {
+                ExitCode::SUCCESS
+            }
         }
         Commands::Coverage { path, format } => {
             let root = std::fs::canonicalize(&path).unwrap_or(path);

@@ -11,7 +11,7 @@
 //! module is skipped rather than guessed, and module matching is grounded
 //! against the index's `module_set`.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::OnceLock;
 
@@ -24,10 +24,15 @@ use crate::code::CodeIndex;
 use crate::findings::{Finding, Verdict};
 
 /// A compiled architectural invariant.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Rule {
-    /// `from` must not depend on `to`.
+    /// `from` must not depend on `to` (a direct import edge).
     ForbidEdge { from: String, to: String },
+    /// `from` must not *transitively* reach `to` through any chain of imports
+    /// (a path of length ≥ 1 in the module graph). Subsumes `ForbidEdge` but is
+    /// opt-in via explicit "transitively"/"indirectly"/"reach" phrasing, so a
+    /// plain "must not import" stays a precise direct-edge check.
+    ForbidReach { from: String, to: String },
     /// `module` may depend only on `allowed` (empty ⇒ "depends on nothing").
     Layer {
         module: String,
@@ -35,6 +40,28 @@ pub enum Rule {
     },
     /// `symbol` must not appear outside the `except` modules.
     ForbidSymbol { symbol: String, except: Vec<String> },
+}
+
+impl Rule {
+    /// A compact one-line summary of the invariant, for the `rules` audit.
+    pub fn describe(&self) -> String {
+        match self {
+            Rule::ForbidEdge { from, to } => format!("`{from}` ✗→ `{to}`"),
+            Rule::ForbidReach { from, to } => format!("`{from}` ✗⇢ `{to}` (transitive)"),
+            Rule::Layer { module, allowed } if allowed.is_empty() => {
+                format!("`{module}` depends on nothing")
+            }
+            Rule::Layer { module, allowed } => {
+                format!("`{module}` → only {}", quote_list(allowed))
+            }
+            Rule::ForbidSymbol { symbol, except } if except.is_empty() => {
+                format!("forbid symbol `{symbol}`")
+            }
+            Rule::ForbidSymbol { symbol, except } => {
+                format!("forbid symbol `{symbol}` (except {})", quote_list(except))
+            }
+        }
+    }
 }
 
 /// A rule plus where it came from (a doc `path:line`, or the rules file).
@@ -72,6 +99,15 @@ pub fn extract_prose_rules(markdown: &str, doc_path: &str) -> Vec<SourcedRule> {
         }
         for c in never_edge_re().captures_iter(line) {
             push(Rule::ForbidEdge {
+                from: c[1].to_string(),
+                to: c[2].to_string(),
+            });
+        }
+        // "`domain` must not transitively/indirectly reach `infra`" — a path,
+        // not just a direct edge. Checked before the direct verbs so the
+        // transitive marker is consumed here rather than left dangling.
+        for c in forbid_reach_re().captures_iter(line) {
+            push(Rule::ForbidReach {
                 from: c[1].to_string(),
                 to: c[2].to_string(),
             });
@@ -119,6 +155,112 @@ pub fn extract_prose_rules(markdown: &str, doc_path: &str) -> Vec<SourcedRule> {
     rules
 }
 
+/// EXPERIMENTAL (audit-only): extract dependency rules whose module operands are
+/// *not* backtick-quoted — the dominant real-world phrasing ("the EVSE module
+/// must not depend on the Station module", "**Repository** layer cannot
+/// reference **Service**"). Backticks are normally required precisely because
+/// they keep precision at 100%; here we instead lean entirely on **grounding**:
+/// a bare operand is only accepted if it resolves to a real module in the graph,
+/// and generic prose nouns (`modules`, `details`, `low-level`, …) are denylisted
+/// so SOLID/RFC boilerplate ("high-level modules should not depend on …") cannot
+/// fire even when a same-named directory happens to exist.
+///
+/// This is wired into `staleguard rules` (the dry-run audit) ONLY, so we can
+/// measure recall/precision on real repos before letting it affect `check`.
+/// Emitted operands are canonicalised to the real module segment they matched,
+/// and each origin is tagged `[bare]` so the report can flag them.
+pub fn extract_bare_rules(
+    markdown: &str,
+    doc_path: &str,
+    modules: &HashSet<String>,
+) -> Vec<SourcedRule> {
+    let mut rules = Vec::new();
+    for (i, line) in markdown.lines().enumerate() {
+        let line = quoted_re().replace_all(line, "");
+        let line = line.as_ref();
+        let origin = format!("{doc_path}:{} [bare]", i + 1);
+
+        let mut push = |from: &str, to: &str, transitive: bool| {
+            let (Some(from), Some(to)) = (
+                canonical_operand(from, modules),
+                canonical_operand(to, modules),
+            ) else {
+                return;
+            };
+            if from == to {
+                return; // a module depending on itself is not a real rule
+            }
+            let rule = if transitive {
+                Rule::ForbidReach { from, to }
+            } else {
+                Rule::ForbidEdge { from, to }
+            };
+            rules.push(SourcedRule {
+                rule,
+                origin: origin.clone(),
+            });
+        };
+
+        for c in bare_reach_re().captures_iter(line) {
+            push(&c[1], &c[2], true);
+        }
+        for c in bare_edge_re().captures_iter(line) {
+            push(&c[1], &c[2], false);
+        }
+    }
+    rules
+}
+
+/// Generic prose nouns that are never module names — the denylist that, together
+/// with grounding, keeps SOLID/RFC/security boilerplate from being read as a
+/// rule. Compared case-insensitively against the bare operand token.
+const BARE_STOPWORDS: &[&str] = &[
+    "module", "modules", "layer", "layers", "package", "packages", "crate", "crates", "component",
+    "components", "code", "library", "libraries", "class", "classes", "interface", "interfaces",
+    "detail", "details", "abstraction", "abstractions", "concretion", "concretions", "anything",
+    "nothing", "something", "them", "it", "this", "that", "these", "those", "other", "others",
+    "any", "all", "each", "both", "one", "low-level", "high-level", "client", "clients", "user",
+    "users", "entity", "entities", "file", "files", "system", "systems", "function", "functions",
+    "method", "methods", "data", "type", "types", "thing", "things", "implementation",
+    "implementations", "framework", "frameworks", "dependency", "dependencies", "runtime",
+    "run-time", "server", "scope", "state", "everything", "concretions", "abstractions",
+];
+
+/// Resolve a bare prose operand to the real module segment it names, or `None`
+/// if it grounds to no module (case-insensitive) or is a denylisted noun. The
+/// returned string is a real path segment, so [`matches`] accepts it verbatim.
+fn canonical_operand(op: &str, modules: &HashSet<String>) -> Option<String> {
+    let op = op.trim_matches(|c: char| !c.is_alphanumeric());
+    if op.is_empty() || BARE_STOPWORDS.iter().any(|w| w.eq_ignore_ascii_case(op)) {
+        return None;
+    }
+    // Single-segment operand: match a real path segment, preserving its case.
+    if !op.contains('/') {
+        for m in modules {
+            for seg in m.split('/') {
+                if seg.eq_ignore_ascii_case(op) {
+                    return Some(seg.to_string());
+                }
+            }
+        }
+        return None;
+    }
+    // Path-style operand (`dafny/specs`): ground by case-insensitive subtree /
+    // leaf / interior match, storing the lowercased form.
+    let lop = op.to_lowercase();
+    for m in modules {
+        let lm = m.to_lowercase();
+        if lm == lop
+            || lm.starts_with(&format!("{lop}/"))
+            || lm.ends_with(&format!("/{lop}"))
+            || lm.contains(&format!("/{lop}/"))
+        {
+            return Some(lop);
+        }
+    }
+    None
+}
+
 // ---- checking -------------------------------------------------------------
 
 /// Verify every rule against the index, returning `contradicted` findings for
@@ -144,6 +286,10 @@ pub fn check(rules: &[SourcedRule], index: &CodeIndex, repo_root: &Path) -> Vec<
                 check_forbid_edge(sr, from, to, index, &modules, &mut findings);
                 add_supported(sr, &modules, before, &mut findings);
             }
+            Rule::ForbidReach { from, to } => {
+                check_forbid_reach(sr, from, to, index, &modules, &mut findings);
+                add_supported(sr, &modules, before, &mut findings);
+            }
             Rule::Layer { module, allowed } => {
                 check_layer(sr, module, allowed, index, &modules, &mut findings);
                 add_supported(sr, &modules, before, &mut findings);
@@ -166,6 +312,104 @@ pub fn check(rules: &[SourcedRule], index: &CodeIndex, repo_root: &Path) -> Vec<
         }
     }
     findings
+}
+
+// ---- audit (dry-run visibility) -------------------------------------------
+
+/// Outcome of auditing one extracted rule against the index.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RuleStatus {
+    /// Grounded and verified: the invariant holds in the current code.
+    Holds,
+    /// Grounded and verified, but violated `count` time(s) in the import graph.
+    Violated(usize),
+    /// Skipped, not guessed: this operand matched no real module, so the rule
+    /// is unverifiable. The string is the offending operand.
+    Ungrounded(String),
+}
+
+/// One audited rule: what was extracted, where from, and how it fared. This is
+/// the data behind `staleguard rules` — it turns the otherwise-silent prose
+/// extraction into something a user can see and debug.
+#[derive(Debug, Clone)]
+pub struct AuditRow {
+    pub rule: Rule,
+    pub origin: String,
+    pub status: RuleStatus,
+}
+
+/// Audit every extracted rule against the index without emitting findings —
+/// reusing the exact same grounding and graph checks as [`check`], so the
+/// report can never disagree with a real run.
+pub fn audit(rules: &[SourcedRule], index: &CodeIndex, repo_root: &Path) -> Vec<AuditRow> {
+    let modules = index.module_set();
+    let sources = if rules
+        .iter()
+        .any(|r| matches!(r.rule, Rule::ForbidSymbol { .. }))
+    {
+        read_sources(repo_root)
+    } else {
+        Vec::new()
+    };
+
+    rules
+        .iter()
+        .map(|sr| {
+            let status = match &sr.rule {
+                Rule::ForbidEdge { from, to } => {
+                    if !grounded(from, &modules) {
+                        RuleStatus::Ungrounded(from.clone())
+                    } else if !grounded(to, &modules) {
+                        RuleStatus::Ungrounded(to.clone())
+                    } else {
+                        let mut out = Vec::new();
+                        check_forbid_edge(sr, from, to, index, &modules, &mut out);
+                        violated_or_holds(out.len())
+                    }
+                }
+                Rule::ForbidReach { from, to } => {
+                    if !grounded(from, &modules) {
+                        RuleStatus::Ungrounded(from.clone())
+                    } else if !grounded(to, &modules) {
+                        RuleStatus::Ungrounded(to.clone())
+                    } else {
+                        let mut out = Vec::new();
+                        check_forbid_reach(sr, from, to, index, &modules, &mut out);
+                        violated_or_holds(out.len())
+                    }
+                }
+                Rule::Layer { module, allowed } => {
+                    if !grounded(module, &modules) {
+                        RuleStatus::Ungrounded(module.clone())
+                    } else {
+                        let mut out = Vec::new();
+                        check_layer(sr, module, allowed, index, &modules, &mut out);
+                        violated_or_holds(out.len())
+                    }
+                }
+                Rule::ForbidSymbol { symbol, except } => {
+                    // Symbol rules ground against source text, not the module
+                    // set, so they are always checkable.
+                    let mut out = Vec::new();
+                    check_forbid_symbol(sr, symbol, except, index, &sources, &mut out);
+                    violated_or_holds(out.len())
+                }
+            };
+            AuditRow {
+                rule: sr.rule.clone(),
+                origin: sr.origin.clone(),
+                status,
+            }
+        })
+        .collect()
+}
+
+fn violated_or_holds(count: usize) -> RuleStatus {
+    if count == 0 {
+        RuleStatus::Holds
+    } else {
+        RuleStatus::Violated(count)
+    }
 }
 
 /// Record the `Supported` claim for a grounded module rule that held (no new
@@ -195,6 +439,15 @@ fn supported_rule(sr: &SourcedRule, modules: &HashSet<String>) -> Option<Finding
             }
             (
                 format!("`{from}` must not import `{to}`"),
+                Provenance::modules([from.clone(), to.clone()]),
+            )
+        }
+        Rule::ForbidReach { from, to } => {
+            if !grounded(from, modules) || !grounded(to, modules) {
+                return None;
+            }
+            (
+                format!("`{from}` must not reach `{to}`"),
                 Provenance::modules([from.clone(), to.clone()]),
             )
         }
@@ -236,6 +489,97 @@ fn check_forbid_edge(
             ));
         }
     }
+}
+
+/// Check a transitive reachability rule: is any module matching `to` reachable
+/// from any module matching `from` through a chain of import edges? Reports the
+/// shortest offending path per distinct source module (one finding each), so the
+/// output stays bounded and each violation names the exact chain to break.
+fn check_forbid_reach(
+    sr: &SourcedRule,
+    from: &str,
+    to: &str,
+    index: &CodeIndex,
+    modules: &HashSet<String>,
+    out: &mut Vec<Finding>,
+) {
+    if !grounded(from, modules) || !grounded(to, modules) {
+        return; // operand names no real module — unverifiable, don't guess.
+    }
+    // Adjacency over concrete module paths.
+    let mut adj: HashMap<&str, Vec<&str>> = HashMap::new();
+    for e in &index.module_edges {
+        adj.entry(&e.from_module).or_default().push(&e.to_module);
+    }
+    // Sorted source modules for deterministic output.
+    let mut sources: Vec<&str> = modules
+        .iter()
+        .map(String::as_str)
+        .filter(|m| matches(m, from))
+        .collect();
+    sources.sort_unstable();
+
+    for src in sources {
+        // A source that itself matches `to` (same subtree) isn't a violation.
+        if matches(src, to) {
+            continue;
+        }
+        if let Some(path) = shortest_path(src, to, from, &adj) {
+            // A direct edge is already reported by `ForbidEdge`-style detail; we
+            // still flag it here but make the path explicit so length-1 and
+            // length-N read the same way.
+            let chain = path.join(" → ");
+            let target = *path.last().unwrap();
+            out.push(
+                violation(
+                    sr,
+                    format!("`{from}` must not reach `{to}`"),
+                    format!("`{src}` transitively reaches `{target}` via {chain}."),
+                    src,
+                    target,
+                )
+                .with_refs(vec![format!("{src} -> {target}")]),
+            );
+        }
+    }
+}
+
+/// BFS for the shortest path from `src` to any module matching `to`, never
+/// passing through a node that matches `from`'s own subtree as the target.
+/// Returns the path as concrete module names (including both endpoints), or
+/// `None` if `to` is unreachable.
+fn shortest_path<'a>(
+    src: &'a str,
+    to: &str,
+    from: &str,
+    adj: &HashMap<&'a str, Vec<&'a str>>,
+) -> Option<Vec<&'a str>> {
+    let mut queue: std::collections::VecDeque<&str> = std::collections::VecDeque::new();
+    let mut prev: HashMap<&str, &str> = HashMap::new();
+    let mut seen: HashSet<&str> = HashSet::new();
+    queue.push_back(src);
+    seen.insert(src);
+    while let Some(cur) = queue.pop_front() {
+        for &next in adj.get(cur).map(Vec::as_slice).unwrap_or(&[]) {
+            if !seen.insert(next) {
+                continue;
+            }
+            prev.insert(next, cur);
+            // A hit: `next` matches `to` but is not itself in `from`'s subtree.
+            if matches(next, to) && !matches(next, from) {
+                let mut path = vec![next];
+                let mut node = next;
+                while let Some(&p) = prev.get(node) {
+                    path.push(p);
+                    node = p;
+                }
+                path.reverse();
+                return Some(path);
+            }
+            queue.push_back(next);
+        }
+    }
+    None
 }
 
 fn check_layer(
@@ -477,6 +821,15 @@ fn never_edge_re() -> &'static Regex {
 
 /// "`X` must not be imported/used/referenced by `Y`" — captures the forbidden
 /// target (1) and the dependent (2); the edge runs Y -> X.
+fn forbid_reach_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(
+            r"`([^`]+)`(?:\s+(?:layer|module|package|crate|component))?\s+(?:must|should|may|can|cannot)\s+not\s+(?:(?:even\s+)?(?:transitively|indirectly)\s+(?:import|imports|depend\s+on|depends\s+on|use|uses|reference|references|reach|reaches)|reach|reaches)\s+(?:the\s+)?`([^`]+)`",
+        )
+        .unwrap()
+    })
+}
 fn forbid_by_re() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
@@ -522,7 +875,33 @@ fn forbid_symbol_re() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
         Regex::new(
-            r"(?:(?:must|should|may)\s+not\s+(?:use|call|invoke|reference)|don'?t\s+(?:use|call)|never\s+(?:use|call)|no\s+(?:direct|raw)|no\s+(?:use|usage|calls?)\s+(?:of|to))\s+`([^`]+)`",
+            r"(?:(?:must|should|may)\s+not\s+(?:use|call|invoke|reference)|don'?t\s+(?:use|call)|never\s+(?:use|call)|no\s+(?:direct|raw)(?:\s+(?:use|usage|calls?|reference)\s+(?:of|to))?|no\s+(?:use|usage|calls?)\s+(?:of|to))\s+`([^`]+)`",
+        )
+        .unwrap()
+    })
+}
+
+/// EXPERIMENTAL bare-operand direct-edge pattern (no backticks). Operands are
+/// captured as bare tokens (optionally **bold**, optionally `the …`, optionally
+/// trailed by a noun like `layer`/`module`/`code`); grounding + the stopword
+/// denylist downstream are what keep this safe. Case-insensitive.
+fn bare_edge_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(
+            r"(?i)(?:the\s+)?\*{0,2}([a-z][\w.-]*(?:/[\w.-]+)*)\*{0,2}(?:\s+(?:layer|module|package|crate|component|code|library))?\s+(?:(?:must|should|may|can)\s+not|cannot|can'?t)\s+(?:import|imports|depend\s+on|depends\s+on|reference|references|access|accesses|use|uses)\s+(?:the\s+)?\*{0,2}([a-z][\w.-]*(?:/[\w.-]+)*)\*{0,2}",
+        )
+        .unwrap()
+    })
+}
+
+/// EXPERIMENTAL bare-operand transitive pattern (no backticks). Mirrors
+/// [`forbid_reach_re`] but with bare tokens.
+fn bare_reach_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(
+            r"(?i)(?:the\s+)?\*{0,2}([a-z][\w.-]*(?:/[\w.-]+)*)\*{0,2}(?:\s+(?:layer|module|package|crate|component|code|library))?\s+(?:(?:must|should|may|can)\s+not|cannot|can'?t)\s+(?:(?:even\s+)?(?:transitively|indirectly)\s+(?:import|imports|depend\s+on|depends\s+on|use|uses|reference|references|reach|reaches)|reach|reaches)\s+(?:the\s+)?\*{0,2}([a-z][\w.-]*(?:/[\w.-]+)*)\*{0,2}",
         )
         .unwrap()
     })
@@ -646,6 +1025,210 @@ mod tests {
     }
 
     #[test]
+    fn audit_reports_holds_violated_and_ungrounded() {
+        let idx = index(vec![edge("src/api", "src/db")]);
+        let rules = vec![
+            SourcedRule {
+                rule: Rule::ForbidEdge {
+                    from: "api".into(),
+                    to: "db".into(),
+                },
+                origin: "ARCH.md:1".into(),
+            },
+            SourcedRule {
+                rule: Rule::ForbidEdge {
+                    from: "api".into(),
+                    to: "domain".into(),
+                },
+                origin: "ARCH.md:2".into(),
+            },
+            SourcedRule {
+                rule: Rule::ForbidEdge {
+                    from: "api".into(),
+                    to: "ghost".into(),
+                },
+                origin: "ARCH.md:3".into(),
+            },
+        ];
+        let rows = audit(&rules, &idx, Path::new("."));
+        assert_eq!(rows[0].status, RuleStatus::Violated(1));
+        // `domain` isn't a real module here, so this edge can't exist → holds
+        // only if grounded; domain is ungrounded, so it's skipped, not "holds".
+        assert_eq!(rows[1].status, RuleStatus::Ungrounded("domain".into()));
+        assert_eq!(rows[2].status, RuleStatus::Ungrounded("ghost".into()));
+    }
+
+    #[test]
+    fn prose_forbid_reach_extracted() {
+        for md in [
+            "`handlers` must not transitively import `store`.",
+            "`a` must not indirectly depend on `b`.",
+            "`a` must not even indirectly use `b`.",
+            "`a` must not reach `b`.",
+        ] {
+            let rules = extract_prose_rules(md, "ARCH.md");
+            assert!(
+                matches!(rules.first().map(|r| &r.rule), Some(Rule::ForbidReach { .. })),
+                "expected a reach rule from: {md:?}"
+            );
+        }
+        // A plain direct import must stay a direct ForbidEdge, not a reach rule.
+        let direct = extract_prose_rules("`a` must not import `b`.", "ARCH.md");
+        assert!(matches!(direct[0].rule, Rule::ForbidEdge { .. }));
+    }
+
+    #[test]
+    fn forbid_reach_flags_transitive_path() {
+        // a -> b -> c; "a must not reach c" is violated through b.
+        let idx = index(vec![edge("src/a", "src/b"), edge("src/b", "src/c")]);
+        let rules = rule(Rule::ForbidReach {
+            from: "a".into(),
+            to: "c".into(),
+        });
+        let f = check(&rules, &idx, Path::new("."));
+        assert_eq!(f.len(), 1);
+        assert_eq!(f[0].verdict, Verdict::Contradicted);
+        assert!(f[0].detail.contains("src/a"));
+        assert!(f[0].detail.contains("src/b"));
+        assert!(f[0].detail.contains("src/c"));
+    }
+
+    #[test]
+    fn forbid_reach_holds_when_unreachable() {
+        // a -> b, and an isolated c. "a must not reach c" holds.
+        let idx = index(vec![edge("src/a", "src/b"), edge("src/c", "src/b")]);
+        let rules = rule(Rule::ForbidReach {
+            from: "a".into(),
+            to: "c".into(),
+        });
+        // Grounded + holds emits a Supported claim, so assert no contradiction
+        // rather than an empty result.
+        let f = check(&rules, &idx, Path::new("."));
+        assert!(f.iter().all(|x| x.verdict != Verdict::Contradicted));
+    }
+
+    #[test]
+    fn forbid_reach_ungrounded_is_skipped() {
+        let idx = index(vec![edge("src/a", "src/b")]);
+        let rows = audit(
+            &rule(Rule::ForbidReach {
+                from: "a".into(),
+                to: "ghost".into(),
+            }),
+            &idx,
+            Path::new("."),
+        );
+        assert_eq!(rows[0].status, RuleStatus::Ungrounded("ghost".into()));
+    }
+
+    fn mods(items: &[&str]) -> HashSet<String> {
+        items.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn bare_extracts_grounded_dependency_rules() {
+        let m = mods(&["src/handlers/h", "src/store/db", "src/util/u"]);
+        // un-backticked operands, the dominant real-world phrasing.
+        let r = extract_bare_rules(
+            "The handlers module must not depend on the store module.",
+            "ARCH.md",
+            &m,
+        );
+        assert_eq!(
+            r[0].rule,
+            Rule::ForbidEdge {
+                from: "handlers".into(),
+                to: "store".into()
+            }
+        );
+        assert!(r[0].origin.ends_with("[bare]"));
+    }
+
+    #[test]
+    fn bare_handles_bold_and_cannot() {
+        let m = mods(&["src/service/s", "src/util/u"]);
+        // **bold** operands + "cannot <verb>" (no following "not").
+        let r = extract_bare_rules("The **service** module cannot import **util**.", "ARCH.md", &m);
+        assert_eq!(
+            r[0].rule,
+            Rule::ForbidEdge {
+                from: "service".into(),
+                to: "util".into()
+            }
+        );
+    }
+
+    #[test]
+    fn bare_extracts_transitive_reach() {
+        let m = mods(&["src/handlers/h", "src/store/db"]);
+        let r = extract_bare_rules("The handlers layer must not transitively reach store.", "ARCH.md", &m);
+        assert_eq!(
+            r[0].rule,
+            Rule::ForbidReach {
+                from: "handlers".into(),
+                to: "store".into()
+            }
+        );
+    }
+
+    #[test]
+    fn bare_suppresses_solid_and_ungrounded_noise() {
+        let m = mods(&["src/handlers/h", "src/store/db"]);
+        // SOLID boilerplate (stopwords), and operands matching no module.
+        for noise in [
+            "High-level modules should not depend on low-level modules.",
+            "Clients should not be forced to depend on interfaces they do not use.",
+            "The frobnicator must not depend on the wizbang.",
+            "Abstractions should not depend on details.",
+        ] {
+            assert!(
+                extract_bare_rules(noise, "ARCH.md", &m).is_empty(),
+                "should not fire on: {noise:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn bare_preserves_real_module_case() {
+        // Java-style CamelCase module segment: operand canonicalises to the real
+        // segment so `matches` (case-sensitive) still finds it downstream.
+        let m = mods(&["api/Handler", "store/Db"]);
+        let r = extract_bare_rules("The Handler module must not depend on Db.", "ARCH.md", &m);
+        assert_eq!(
+            r[0].rule,
+            Rule::ForbidEdge {
+                from: "Handler".into(),
+                to: "Db".into()
+            }
+        );
+    }
+
+    #[test]
+    fn audit_holds_when_grounded_and_clean() {
+        let idx = index(vec![edge("src/api", "src/domain")]);
+        let rules = vec![SourcedRule {
+            rule: Rule::ForbidEdge {
+                from: "api".into(),
+                to: "domain".into(),
+            },
+            origin: "ARCH.md:1".into(),
+        }];
+        // both operands ground to real modules; the forbidden edge does exist.
+        assert_eq!(audit(&rules, &idx, Path::new("."))[0].status, RuleStatus::Violated(1));
+
+        let idx = index(vec![edge("src/api", "src/domain"), edge("src/api", "src/util")]);
+        let rules = vec![SourcedRule {
+            rule: Rule::ForbidEdge {
+                from: "util".into(),
+                to: "domain".into(),
+            },
+            origin: "ARCH.md:1".into(),
+        }];
+        // util and domain both real; util→domain edge absent → holds.
+        assert_eq!(audit(&rules, &idx, Path::new("."))[0].status, RuleStatus::Holds);
+    }
+
+    #[test]
     fn layer_depends_on_nothing() {
         let idx = index(vec![edge("src/domain", "src/infra")]);
         let rules = rule(Rule::Layer {
@@ -723,6 +1306,29 @@ mod tests {
                 except: vec!["config".into()]
             }
         );
+    }
+
+    #[test]
+    fn prose_forbid_symbol_no_direct_use_of() {
+        // "no direct use of `X`" — a very common phrasing that previously fell
+        // between the `no direct` and `no use of` branches and silently dropped.
+        for md in [
+            "There must be no direct use of `process.env` outside `config`.",
+            "no raw usage of `os.environ`",
+            "no direct calls to `eval`",
+        ] {
+            let rules = extract_prose_rules(md, "ARCH.md");
+            assert!(
+                matches!(rules.first().map(|r| &r.rule), Some(Rule::ForbidSymbol { .. })),
+                "expected a forbid-symbol rule from: {md:?}"
+            );
+        }
+        // The bare-backtick form still works (optional group absent).
+        let md = "no direct `process.env`";
+        assert!(matches!(
+            extract_prose_rules(md, "ARCH.md").first().map(|r| &r.rule),
+            Some(Rule::ForbidSymbol { .. })
+        ));
     }
 
     #[test]
