@@ -215,15 +215,80 @@ pub fn extract_bare_rules(
 /// with grounding, keeps SOLID/RFC/security boilerplate from being read as a
 /// rule. Compared case-insensitively against the bare operand token.
 const BARE_STOPWORDS: &[&str] = &[
-    "module", "modules", "layer", "layers", "package", "packages", "crate", "crates", "component",
-    "components", "code", "library", "libraries", "class", "classes", "interface", "interfaces",
-    "detail", "details", "abstraction", "abstractions", "concretion", "concretions", "anything",
-    "nothing", "something", "them", "it", "this", "that", "these", "those", "other", "others",
-    "any", "all", "each", "both", "one", "low-level", "high-level", "client", "clients", "user",
-    "users", "entity", "entities", "file", "files", "system", "systems", "function", "functions",
-    "method", "methods", "data", "type", "types", "thing", "things", "implementation",
-    "implementations", "framework", "frameworks", "dependency", "dependencies", "runtime",
-    "run-time", "server", "scope", "state", "everything", "concretions", "abstractions",
+    "module",
+    "modules",
+    "layer",
+    "layers",
+    "package",
+    "packages",
+    "crate",
+    "crates",
+    "component",
+    "components",
+    "code",
+    "library",
+    "libraries",
+    "class",
+    "classes",
+    "interface",
+    "interfaces",
+    "detail",
+    "details",
+    "abstraction",
+    "abstractions",
+    "concretion",
+    "concretions",
+    "anything",
+    "nothing",
+    "something",
+    "them",
+    "it",
+    "this",
+    "that",
+    "these",
+    "those",
+    "other",
+    "others",
+    "any",
+    "all",
+    "each",
+    "both",
+    "one",
+    "low-level",
+    "high-level",
+    "client",
+    "clients",
+    "user",
+    "users",
+    "entity",
+    "entities",
+    "file",
+    "files",
+    "system",
+    "systems",
+    "function",
+    "functions",
+    "method",
+    "methods",
+    "data",
+    "type",
+    "types",
+    "thing",
+    "things",
+    "implementation",
+    "implementations",
+    "framework",
+    "frameworks",
+    "dependency",
+    "dependencies",
+    "runtime",
+    "run-time",
+    "server",
+    "scope",
+    "state",
+    "everything",
+    "concretions",
+    "abstractions",
 ];
 
 /// Resolve a bare prose operand to the real module segment it names, or `None`
@@ -1068,7 +1133,10 @@ mod tests {
         ] {
             let rules = extract_prose_rules(md, "ARCH.md");
             assert!(
-                matches!(rules.first().map(|r| &r.rule), Some(Rule::ForbidReach { .. })),
+                matches!(
+                    rules.first().map(|r| &r.rule),
+                    Some(Rule::ForbidReach { .. })
+                ),
                 "expected a reach rule from: {md:?}"
             );
         }
@@ -1148,7 +1216,11 @@ mod tests {
     fn bare_handles_bold_and_cannot() {
         let m = mods(&["src/service/s", "src/util/u"]);
         // **bold** operands + "cannot <verb>" (no following "not").
-        let r = extract_bare_rules("The **service** module cannot import **util**.", "ARCH.md", &m);
+        let r = extract_bare_rules(
+            "The **service** module cannot import **util**.",
+            "ARCH.md",
+            &m,
+        );
         assert_eq!(
             r[0].rule,
             Rule::ForbidEdge {
@@ -1161,7 +1233,11 @@ mod tests {
     #[test]
     fn bare_extracts_transitive_reach() {
         let m = mods(&["src/handlers/h", "src/store/db"]);
-        let r = extract_bare_rules("The handlers layer must not transitively reach store.", "ARCH.md", &m);
+        let r = extract_bare_rules(
+            "The handlers layer must not transitively reach store.",
+            "ARCH.md",
+            &m,
+        );
         assert_eq!(
             r[0].rule,
             Rule::ForbidReach {
@@ -1214,9 +1290,15 @@ mod tests {
             origin: "ARCH.md:1".into(),
         }];
         // both operands ground to real modules; the forbidden edge does exist.
-        assert_eq!(audit(&rules, &idx, Path::new("."))[0].status, RuleStatus::Violated(1));
+        assert_eq!(
+            audit(&rules, &idx, Path::new("."))[0].status,
+            RuleStatus::Violated(1)
+        );
 
-        let idx = index(vec![edge("src/api", "src/domain"), edge("src/api", "src/util")]);
+        let idx = index(vec![
+            edge("src/api", "src/domain"),
+            edge("src/api", "src/util"),
+        ]);
         let rules = vec![SourcedRule {
             rule: Rule::ForbidEdge {
                 from: "util".into(),
@@ -1225,7 +1307,10 @@ mod tests {
             origin: "ARCH.md:1".into(),
         }];
         // util and domain both real; util→domain edge absent → holds.
-        assert_eq!(audit(&rules, &idx, Path::new("."))[0].status, RuleStatus::Holds);
+        assert_eq!(
+            audit(&rules, &idx, Path::new("."))[0].status,
+            RuleStatus::Holds
+        );
     }
 
     #[test]
@@ -1319,7 +1404,10 @@ mod tests {
         ] {
             let rules = extract_prose_rules(md, "ARCH.md");
             assert!(
-                matches!(rules.first().map(|r| &r.rule), Some(Rule::ForbidSymbol { .. })),
+                matches!(
+                    rules.first().map(|r| &r.rule),
+                    Some(Rule::ForbidSymbol { .. })
+                ),
                 "expected a forbid-symbol rule from: {md:?}"
             );
         }
