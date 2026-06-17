@@ -4,7 +4,7 @@
 
 # Staleguard
 
-Catch **documentation drift** — places where your `CLAUDE.md`, READMEs, and
+Catch **documentation drift** — places where your READMEs, `CLAUDE.md`, and
 `*.md` docs claim something the code no longer backs up. Staleguard checks docs
 against the actual codebase and reports what's stale, wrong, or missing.
 
