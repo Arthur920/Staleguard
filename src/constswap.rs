@@ -16,6 +16,15 @@
 //!   3. that symbol carries exactly one distinct literal of the claimed *type*,
 //!      and it differs from the claimed value.
 //!
+//! Integers, bools, and (delimited) strings are compared. A string claim only
+//! counts when the prose value is itself delimited (backticked/quoted) and both
+//! sides are "plain" — no interpolation, format placeholders, or escapes — since
+//! those have no statically-knowable value to contradict. A code-side string is
+//! further required to be a single whitespace-free token (a docstring or message
+//! is not a value) and not equal to the symbol's own name (a self-referential
+//! accessor key is not a default). Bool spellings are matched case-insensitively
+//! so a delimited `True`/`False` is typed as a bool, not a string.
+//!
 //! If the symbol has several competing literals, or none, we stay silent — an
 //! ambiguous body is "unverifiable", never "contradicted".
 
@@ -46,13 +55,19 @@ enum Value {
     /// canonical decimal-integer text (suffix/underscore stripped).
     Int(String),
     Bool(bool),
+    /// the *inner* content of a string literal (quotes/prefix stripped). Only
+    /// ever produced from a delimited prose value, never a bare word.
+    Str(String),
 }
 
 impl Value {
+    /// Canonical comparison/display key. Strings are re-quoted so the report
+    /// reads naturally and a string key can never collide with an int/bool one.
     fn render(&self) -> String {
         match self {
             Value::Int(n) => n.clone(),
             Value::Bool(b) => b.to_string(),
+            Value::Str(s) => format!("\"{s}\""),
         }
     }
 }
@@ -74,7 +89,15 @@ pub fn check(markdown: &str, doc_path: &str, index: &CodeIndex) -> Vec<Finding> 
 ///   * `` `SYM` = <value> ``     — "`retries` = 3"
 fn extract_claims(markdown: &str, doc_path: &str) -> Vec<ConstClaim> {
     let mut out = Vec::new();
+    // Lines inside ``` / ~~~ fences are code samples, not prose claims — a
+    // literal `secret_key="..."` there is an example, not a statement about the
+    // symbol's default. Skipping them keeps us inside the zero-FP regime, exactly
+    // as the path and config passes do.
+    let fenced = crate::extract::fenced_lines(markdown);
     for (i, line) in markdown.lines().enumerate() {
+        if fenced[i] {
+            continue;
+        }
         for caps in claim_re().captures_iter(line) {
             // A backticked identifier is always an intended code anchor. A bare
             // one is only trusted when its *shape* is unambiguously code
@@ -86,9 +109,19 @@ fn extract_claims(markdown: &str, doc_path: &str) -> Vec<ConstClaim> {
                 (None, Some(m)) if is_code_shaped(m.as_str()) => m.as_str().to_string(),
                 _ => continue,
             };
-            let raw = caps.name("val").unwrap().as_str();
-            let Some(value) = parse_value(raw) else {
-                continue;
+            // A delimited value (backticked/quoted) may be a string OR a
+            // number; a bare value is only ever trusted as a number/bool.
+            let delimited = caps.name("dvalb").or_else(|| caps.name("dvalq"));
+            let value = if let Some(m) = delimited {
+                let Some(v) = parse_delimited(m.as_str()) else {
+                    continue;
+                };
+                v
+            } else {
+                let Some(v) = parse_value(caps.name("val").unwrap().as_str()) else {
+                    continue;
+                };
+                v
             };
             out.push(ConstClaim {
                 symbol,
@@ -114,7 +147,7 @@ fn claim_re() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
         Regex::new(
-            r"(?x)
+            r#"(?x)
             (?:
                   ` (?P<bsym>[A-Za-z_][A-Za-z0-9_]*) `   # backticked identifier
                 | \b (?P<psym>[A-Za-z_][A-Za-z0-9_]*)    # bare identifier
@@ -129,20 +162,26 @@ fn claim_re() -> &'static Regex {
                 | =
             )
             \s*
-            `?                                        # value may be backticked
-            (?P<val>-?\d[\d_]*(?:\.\d+)?|true|false)
-            `?
-            ",
+            (?:
+                  ` (?P<dvalb>[^`]+) `                # backtick-delimited value (string or number)
+                | " (?P<dvalq>[^"]+) "                # double-quote-delimited value
+                | (?P<val>-?\d[\d_]*(?:\.\d+)?|true|false)  # bare numeric / bool
+            )
+            "#,
         )
         .unwrap()
     })
 }
 
-/// Normalize a matched literal to `Facts.constants` shape, or `None` if it isn't
-/// a type we compare (only integers and bools — floats and strings carry too
-/// much formatting variance to assert a *contradiction* on safely).
+/// Normalize a *bare* matched literal to `Facts.constants` shape, or `None` if
+/// it isn't a type we trust un-delimited (only integers and bools — floats carry
+/// too much formatting variance, and a bare word is never read as a string).
+/// Delimited values go through [`parse_delimited`], which also handles strings.
 fn parse_value(raw: &str) -> Option<Value> {
-    match raw {
+    // Bool spellings are matched case-insensitively so a delimited Python/Go
+    // `True`/`False` is typed as a bool rather than falling through to the string
+    // path (where it would spuriously compare against, e.g., a property docstring).
+    match raw.to_ascii_lowercase().as_str() {
         "true" => return Some(Value::Bool(true)),
         "false" => return Some(Value::Bool(false)),
         _ => {}
@@ -151,6 +190,57 @@ fn parse_value(raw: &str) -> Option<Value> {
         return None; // float: skip, see doc comment.
     }
     canon_int(raw).map(Value::Int)
+}
+
+/// Normalize a *delimited* prose value (one written inside backticks or quotes,
+/// so the author clearly meant a literal). A delimited value that parses as an
+/// int/bool is treated as such; otherwise it is a string, but only a "plain"
+/// one — we refuse interpolated/escaped content (`${x}`, `{0}`, `\n`) since its
+/// runtime value isn't statically knowable, which would risk a false contradiction.
+fn parse_delimited(raw: &str) -> Option<Value> {
+    if let Some(v) = parse_value(raw) {
+        return Some(v);
+    }
+    if is_plain_string(raw) {
+        return Some(Value::Str(raw.to_string()));
+    }
+    None
+}
+
+/// A string with no interpolation/format/escape machinery — safe to compare for
+/// exact equality. Rejects empty/whitespace-only content too.
+fn is_plain_string(s: &str) -> bool {
+    !s.trim().is_empty() && !s.chars().any(|c| matches!(c, '\\' | '{' | '}' | '$'))
+}
+
+/// Strip a string literal's optional prefix (r, f, b, rb, …) and one matching
+/// pair of surrounding quotes (double, single, or backtick), returning the inner
+/// content — or `None` if `c` isn't a recognizable, plain string literal.
+fn unquote_code_string(c: &str) -> Option<String> {
+    let c = c.trim();
+    // Skip a short ascii-alpha prefix that precedes the opening quote.
+    let body = match c.find(['"', '\'', '`']) {
+        Some(0) => c,
+        Some(i) if i <= 2 && c[..i].chars().all(|ch| ch.is_ascii_alphabetic()) => &c[i..],
+        _ => return None,
+    };
+    let mut chars = body.chars();
+    let quote = chars.next()?;
+    if !matches!(quote, '"' | '\'' | '`') {
+        return None;
+    }
+    let inner = chars.as_str().strip_suffix(quote)?;
+    if !is_plain_string(inner) {
+        return None;
+    }
+    // A genuine default *value* is a single token (`us-east-1`, `production`,
+    // `INFO`); a string literal carrying internal whitespace is overwhelmingly a
+    // docstring or message, not a value, so it must not ground a value claim.
+    // (This is the pydantic `@property` whose lone literal is its docstring.)
+    if inner.chars().any(|c| c.is_whitespace()) {
+        return None;
+    }
+    Some(inner.to_string())
 }
 
 /// Canonical decimal text for an integer literal: drop `_` separators and any
@@ -190,6 +280,14 @@ fn check_claim(claim: &ConstClaim, index: &CodeIndex) -> Option<Finding> {
     for s in &matched {
         for c in &s.facts.constants {
             if let Some(v) = constant_of_kind(c, &claim.value) {
+                // A string literal identical to the symbol's own name is a
+                // self-referential accessor key (`get file -> _get("file")`), not
+                // a configured default — skip it. (The vite `file` getter FP.)
+                if matches!(claim.value, Value::Str(_))
+                    && v.eq_ignore_ascii_case(&format!("\"{}\"", s.name))
+                {
+                    continue;
+                }
                 if !observed.contains(&v) {
                     observed.push(v);
                 }
@@ -235,8 +333,9 @@ fn check_claim(claim: &ConstClaim, index: &CodeIndex) -> Option<Finding> {
 /// is a different kind (a string literal when we're comparing an int, etc.).
 fn constant_of_kind(constant: &str, want: &Value) -> Option<String> {
     match want {
-        Value::Bool(_) => match constant {
-            "true" | "false" => Some(constant.to_string()),
+        Value::Bool(_) => match constant.to_ascii_lowercase().as_str() {
+            "true" => Some("true".to_string()),
+            "false" => Some("false".to_string()),
             _ => None,
         },
         Value::Int(_) => {
@@ -246,6 +345,9 @@ fn constant_of_kind(constant: &str, want: &Value) -> Option<String> {
             }
             canon_int(constant)
         }
+        // Compare only against genuine string literals, re-quoted to the same
+        // key shape as `Value::render` so neither side can collide with a number.
+        Value::Str(_) => unquote_code_string(constant).map(|s| format!("\"{s}\"")),
     }
 }
 
@@ -401,6 +503,65 @@ mod tests {
     }
 
     #[test]
+    fn string_swap() {
+        let idx = index_of(vec![sym("region", &["\"eu-west-1\""])]);
+        let f = check("The `region` defaults to `us-east-1`.", "README.md", &idx);
+        assert_eq!(f.len(), 1);
+        assert_eq!(f[0].verdict, Verdict::Contradicted);
+        assert!(f[0].detail.contains("us-east-1"));
+        assert!(f[0].detail.contains("eu-west-1"));
+    }
+
+    #[test]
+    fn string_agreement_is_supported() {
+        let idx = index_of(vec![sym("region", &["\"us-east-1\""])]);
+        let v = verdicts("`region` defaults to `us-east-1`", &idx);
+        assert_eq!(v, vec![Verdict::Supported]);
+        assert!(!v[0].is_reportable());
+    }
+
+    #[test]
+    fn string_quote_styles_and_prefixes_normalize() {
+        // single-quoted (Python), prefixed (Rust raw) code literals compare by
+        // inner content; a double-quoted prose value works too.
+        let idx = index_of(vec![sym("mode", &["'production'"])]);
+        assert_eq!(
+            verdicts("`mode` is set to `staging`", &idx),
+            vec![Verdict::Contradicted]
+        );
+        let idx = index_of(vec![sym("mode", &["r\"production\""])]);
+        assert_eq!(
+            verdicts("`mode` defaults to \"production\"", &idx),
+            vec![Verdict::Supported]
+        );
+    }
+
+    #[test]
+    fn interpolated_string_value_is_silent() {
+        // a format/interpolated literal has no static value — never contradict.
+        let idx = index_of(vec![sym("greeting", &["\"hello ${name}\""])]);
+        assert!(verdicts("`greeting` defaults to `hello world`", &idx).is_empty());
+        // and an interpolated *prose* value is rejected at extraction.
+        let idx = index_of(vec![sym("greeting", &["\"hello world\""])]);
+        assert!(verdicts("`greeting` defaults to `hi ${name}`", &idx).is_empty());
+    }
+
+    #[test]
+    fn bare_string_value_is_not_trusted() {
+        // an un-delimited word is never read as a string value (too loose).
+        let idx = index_of(vec![sym("mode", &["\"production\""])]);
+        assert!(verdicts("`mode` defaults to staging", &idx).is_empty());
+    }
+
+    #[test]
+    fn string_claim_ignores_numeric_constant() {
+        // claimed string vs a symbol whose only literal is an int → no string to
+        // compare, stay silent.
+        let idx = index_of(vec![sym("port", &["8080"])]);
+        assert!(verdicts("`port` defaults to `https`", &idx).is_empty());
+    }
+
+    #[test]
     fn type_mismatch_does_not_match_string_literal() {
         // code constant is the string "8080", doc claims int 8080 → no int to
         // compare, stay silent rather than spuriously support/контradict.
@@ -529,6 +690,68 @@ mod tests {
             recall >= 0.90,
             "recall regression: {recall:.3} < 0.90 floor (tp={tp} fn={fn_})\n{}",
             misses.join("\n")
+        );
+    }
+
+    #[test]
+    fn fenced_code_sample_is_not_a_claim() {
+        // an assignment inside a ``` block is example code, not a prose claim —
+        // even though its shape matches, we must not ground it (this is the
+        // fastapi `secret_key="supersecret"` wild false positive).
+        let idx = index_of(vec![sym("secret_key", &["\"realdefault\""])]);
+        let md = "```python\nsecret_key=\"supersecret\"\n```";
+        assert!(check(md, "README.md", &idx).is_empty());
+    }
+
+    #[test]
+    fn docstring_literal_is_not_a_value() {
+        // a property whose only literal is its docstring (multi-word, spaces) must
+        // not ground a string value claim. This is the pydantic `serialize_as_any`
+        // wild false positive: prose "set to `True`" vs a body that is just a
+        // docstring. Capitalized `True` is now typed as a bool, and the docstring
+        // is rejected as a string value — both guards independently silence it.
+        let idx = index_of(vec![sym(
+            "serialize_as_any",
+            &["\"The serialize_as_any argument set during serialization.\""],
+        )]);
+        assert!(verdicts("`serialize_as_any` set to `True`", &idx).is_empty());
+        assert!(verdicts("`serialize_as_any` set to `False`", &idx).is_empty());
+        // a single-token string value still grounds normally.
+        let idx = index_of(vec![sym("mode", &["\"production\""])]);
+        assert_eq!(
+            verdicts("`mode` is set to `staging`", &idx),
+            vec![Verdict::Contradicted]
+        );
+    }
+
+    #[test]
+    fn self_referential_key_is_not_a_value() {
+        // the vite `file` getter: its lone string literal is its own accessor key
+        // (`_get("file")`), equal to the symbol name — not a default. A hypothetical
+        // "If `file` is `'foo/bar'`" must not contradict it.
+        let idx = index_of(vec![sym("file", &["\"file\""])]);
+        assert!(verdicts("If `file` is `foo/bar`", &idx).is_empty());
+        // a different literal is still a real value to compare against.
+        let idx = index_of(vec![sym("file", &["\"default.txt\""])]);
+        assert_eq!(
+            verdicts("`file` defaults to `other.txt`", &idx),
+            vec![Verdict::Contradicted]
+        );
+    }
+
+    #[test]
+    fn capitalized_bool_grounds_as_bool() {
+        // delimited `True`/`False` are bools, matching a code bool literal of
+        // either casing (Python `True`, Rust `false`).
+        let idx = index_of(vec![sym("strict", &["false"])]);
+        assert_eq!(
+            verdicts("`strict` defaults to `True`", &idx),
+            vec![Verdict::Contradicted]
+        );
+        let idx = index_of(vec![sym("strict", &["True"])]);
+        assert_eq!(
+            verdicts("`strict` defaults to `True`", &idx),
+            vec![Verdict::Supported]
         );
     }
 
