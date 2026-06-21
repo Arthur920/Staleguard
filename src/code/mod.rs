@@ -72,7 +72,9 @@ fn serialize_ref_callers<S: serde::Serializer>(
 /// target. The inverse of the flat serialization above; used by tests that
 /// construct a [`CodeIndex`] from explicit edges.
 #[cfg(test)]
-pub fn ref_callers_from(edges: impl IntoIterator<Item = RefEdge>) -> HashMap<Arc<str>, Vec<Arc<str>>> {
+pub fn ref_callers_from(
+    edges: impl IntoIterator<Item = RefEdge>,
+) -> HashMap<Arc<str>, Vec<Arc<str>>> {
     let mut map: HashMap<Arc<str>, Vec<Arc<str>>> = HashMap::new();
     for e in edges {
         let froms = map.entry(e.to_symbol).or_default();
