@@ -75,15 +75,15 @@
 {"text": "`payments` must not be accessed in `service`.", "modules": ["payments", "service"], "gold": [{"kind": "forbid_edge", "from": "service", "to": "payments"}], "tag": "gen-by-8"}
 {"text": "`worker` should not be depended on by `queue`.", "modules": ["worker", "queue"], "gold": [{"kind": "forbid_edge", "from": "queue", "to": "worker"}], "tag": "gen-by-9"}
 
-// === GENERATED: backticked symmetric independence (independent_re; two edges) ===
-{"text": "`cli` is independent of `app.core`.", "modules": ["cli", "app.core"], "gold": [{"kind": "forbid_edge", "from": "cli", "to": "app.core"}, {"kind": "forbid_edge", "from": "app.core", "to": "cli"}], "tag": "gen-indep-0"}
-{"text": "`controllers` are independent from `parser`.", "modules": ["controllers", "parser"], "gold": [{"kind": "forbid_edge", "from": "controllers", "to": "parser"}, {"kind": "forbid_edge", "from": "parser", "to": "controllers"}], "tag": "gen-indep-1"}
-{"text": "`handlers` stays independent of `http_client`.", "modules": ["handlers", "http_client"], "gold": [{"kind": "forbid_edge", "from": "handlers", "to": "http_client"}, {"kind": "forbid_edge", "from": "http_client", "to": "handlers"}], "tag": "gen-indep-2"}
-{"text": "`models` remains independent from `renderer`.", "modules": ["models", "renderer"], "gold": [{"kind": "forbid_edge", "from": "models", "to": "renderer"}, {"kind": "forbid_edge", "from": "renderer", "to": "models"}], "tag": "gen-indep-3"}
-{"text": "`transport` is independent of `gateway`.", "modules": ["transport", "gateway"], "gold": [{"kind": "forbid_edge", "from": "transport", "to": "gateway"}, {"kind": "forbid_edge", "from": "gateway", "to": "transport"}], "tag": "gen-indep-4"}
-{"text": "`x` are independent from `usecase`.", "modules": ["x", "usecase"], "gold": [{"kind": "forbid_edge", "from": "x", "to": "usecase"}, {"kind": "forbid_edge", "from": "usecase", "to": "x"}], "tag": "gen-indep-5"}
-{"text": "`adapter` stays independent of `ui`.", "modules": ["adapter", "ui"], "gold": [{"kind": "forbid_edge", "from": "adapter", "to": "ui"}, {"kind": "forbid_edge", "from": "ui", "to": "adapter"}], "tag": "gen-indep-6"}
-{"text": "`api` remains independent from `data_access`.", "modules": ["api", "data_access"], "gold": [{"kind": "forbid_edge", "from": "api", "to": "data_access"}, {"kind": "forbid_edge", "from": "data_access", "to": "api"}], "tag": "gen-indep-7"}
+// === GENERATED: backticked symmetric independence (independent_re; symmetric ForbidReach) ===
+{"text": "`cli` is independent of `app.core`.", "modules": ["cli", "app.core"], "gold": [{"kind": "forbid_reach", "from": "cli", "to": "app.core"}, {"kind": "forbid_reach", "from": "app.core", "to": "cli"}], "tag": "gen-indep-0"}
+{"text": "`controllers` are independent from `parser`.", "modules": ["controllers", "parser"], "gold": [{"kind": "forbid_reach", "from": "controllers", "to": "parser"}, {"kind": "forbid_reach", "from": "parser", "to": "controllers"}], "tag": "gen-indep-1"}
+{"text": "`handlers` stays independent of `http_client`.", "modules": ["handlers", "http_client"], "gold": [{"kind": "forbid_reach", "from": "handlers", "to": "http_client"}, {"kind": "forbid_reach", "from": "http_client", "to": "handlers"}], "tag": "gen-indep-2"}
+{"text": "`models` remains independent from `renderer`.", "modules": ["models", "renderer"], "gold": [{"kind": "forbid_reach", "from": "models", "to": "renderer"}, {"kind": "forbid_reach", "from": "renderer", "to": "models"}], "tag": "gen-indep-3"}
+{"text": "`transport` is independent of `gateway`.", "modules": ["transport", "gateway"], "gold": [{"kind": "forbid_reach", "from": "transport", "to": "gateway"}, {"kind": "forbid_reach", "from": "gateway", "to": "transport"}], "tag": "gen-indep-4"}
+{"text": "`x` are independent from `usecase`.", "modules": ["x", "usecase"], "gold": [{"kind": "forbid_reach", "from": "x", "to": "usecase"}, {"kind": "forbid_reach", "from": "usecase", "to": "x"}], "tag": "gen-indep-5"}
+{"text": "`adapter` stays independent of `ui`.", "modules": ["adapter", "ui"], "gold": [{"kind": "forbid_reach", "from": "adapter", "to": "ui"}, {"kind": "forbid_reach", "from": "ui", "to": "adapter"}], "tag": "gen-indep-6"}
+{"text": "`api` remains independent from `data_access`.", "modules": ["api", "data_access"], "gold": [{"kind": "forbid_reach", "from": "api", "to": "data_access"}, {"kind": "forbid_reach", "from": "data_access", "to": "api"}], "tag": "gen-indep-7"}
 
 // === GENERATED: backticked depends-on-nothing layers (depends_nothing_re) ===
 {"text": "`cli` depends on nothing.", "modules": ["cli"], "gold": [{"kind": "layer", "module": "cli", "allowed": []}], "tag": "gen-nothing-0"}
@@ -259,3 +259,16 @@
 {"text": "The `auth` service must not call the `billing` service.", "modules": ["auth", "billing"], "gold": [{"kind": "forbid_edge", "from": "auth", "to": "billing"}], "tag": "miss-call-the-verb"}
 {"text": "`web` must not communicate with `db` directly.", "modules": ["web", "db"], "gold": [{"kind": "forbid_edge", "from": "web", "to": "db"}], "tag": "miss-communicate-with"}
 {"text": "Anything under `cli` must not reach back into `app.core`.", "modules": ["cli", "app.core"], "gold": [{"kind": "forbid_reach", "from": "cli", "to": "app.core"}], "tag": "miss-reach-back-into"}
+
+// === operand lists, soft-wrapped sentences, hedged noise ===
+{"text": "`ui`, `cli` must not import `db` or `cache`.", "modules": ["ui", "cli", "db", "cache"], "gold": [{"kind": "forbid_edge", "from": "ui", "to": "db"}, {"kind": "forbid_edge", "from": "ui", "to": "cache"}, {"kind": "forbid_edge", "from": "cli", "to": "db"}, {"kind": "forbid_edge", "from": "cli", "to": "cache"}], "tag": "list-cross"}
+{"text": "`api` must not depend on `db` or `queue`.", "modules": ["api", "db", "queue"], "gold": [{"kind": "forbid_edge", "from": "api", "to": "db"}, {"kind": "forbid_edge", "from": "api", "to": "queue"}], "tag": "list-target"}
+{"text": "The `controllers` layer must not\nimport `db` directly.", "modules": ["controllers", "db"], "gold": [{"kind": "forbid_edge", "from": "controllers", "to": "db"}], "tag": "soft-wrap"}
+{"text": "Previously, `api` must not import `db`.", "modules": ["api", "db"], "gold": [], "tag": "hedge-previously"}
+{"text": "For example, `api` must not import `db` is a rule staleguard can check.", "modules": ["api", "db"], "gold": [], "tag": "hedge-example"}
+{"text": "If `api` must not import `db`, declare the rule in ARCHITECTURE.md.", "modules": ["api", "db"], "gold": [], "tag": "hedge-conditional"}
+
+// === sentence granularity (7.3): boundary + late-sentence hedge ===
+{"text": "Layering is enforced. If `api` must not import `db`, use the port abstraction.", "modules": ["api", "db"], "gold": [], "tag": "sentence-late-hedge"}
+{"text": "`api` talks to `domain`. `domain` must not import `infra`.", "modules": ["api", "domain", "infra"], "gold": [{"kind": "forbid_edge", "from": "domain", "to": "infra"}], "tag": "sentence-second-real"}
+{"text": "`ui` renders the view. `cli` parses flags.", "modules": ["ui", "cli", "view", "flags"], "gold": [], "tag": "sentence-no-cross-match"}

@@ -17,18 +17,24 @@ use super::{Rule, SourcedRule};
 /// ordinary prose.
 pub fn extract_prose_rules(markdown: &str, doc_path: &str) -> Vec<SourcedRule> {
     let mut rules = Vec::new();
-    let fenced = crate::extract::fenced_lines(markdown);
-    for (i, line) in markdown.lines().enumerate() {
+    for (i, line, fenced) in logical_lines(markdown) {
         // A "rule" inside a fenced code sample is example code, not an enforced
         // architecture rule — e.g. a `// Don't call X here` comment teaching an
         // API. Only prose states rules.
-        if fenced[i] {
+        if fenced {
             continue;
         }
         // Drop double-quoted spans: an author quoting an *example* rule
         // ("no `eval`") is describing the feature, not stating an enforced rule.
-        let line = quoted_re().replace_all(line, "");
+        let line = quoted_re().replace_all(&line, "");
         let line = line.as_ref();
+        // Hedged/conditional/historical prose isn't a stated rule: "previously,
+        // `api` could not import `db`", "if `api` must not import `db`, …". The
+        // whole-line check keeps mid-line markers ("e.g.", "for example")
+        // suppressing the sentence they qualify even after the split below.
+        if hedged(line) {
+            continue;
+        }
         let origin = format!("{doc_path}:{}", i + 1);
         let mut push = |rule| {
             rules.push(SourcedRule {
@@ -37,65 +43,86 @@ pub fn extract_prose_rules(markdown: &str, doc_path: &str) -> Vec<SourcedRule> {
             })
         };
 
-        for c in forbid_edge_re().captures_iter(line) {
-            push(Rule::ForbidEdge {
-                from: c[1].to_string(),
-                to: c[2].to_string(),
-            });
-        }
-        for c in never_edge_re().captures_iter(line) {
-            push(Rule::ForbidEdge {
-                from: c[1].to_string(),
-                to: c[2].to_string(),
-            });
-        }
-        // "`domain` must not transitively/indirectly reach `infra`" — a path,
-        // not just a direct edge. Checked before the direct verbs so the
-        // transitive marker is consumed here rather than left dangling.
-        for c in forbid_reach_re().captures_iter(line) {
-            push(Rule::ForbidReach {
-                from: c[1].to_string(),
-                to: c[2].to_string(),
-            });
-        }
-        // "`db` must not be imported by `api`" — reverse direction (api -> db).
-        for c in forbid_by_re().captures_iter(line) {
-            push(Rule::ForbidEdge {
-                from: c[2].to_string(),
-                to: c[1].to_string(),
-            });
-        }
-        // "`domain` is independent of `infra`" — symmetric: forbid both edges.
-        for c in independent_re().captures_iter(line) {
-            push(Rule::ForbidEdge {
-                from: c[1].to_string(),
-                to: c[2].to_string(),
-            });
-            push(Rule::ForbidEdge {
-                from: c[2].to_string(),
-                to: c[1].to_string(),
-            });
-        }
-        for c in depends_nothing_re().captures_iter(line) {
-            push(Rule::Layer {
-                module: c[1].to_string(),
-                allowed: Vec::new(),
-            });
-        }
-        for c in only_depends_re().captures_iter(line) {
-            let allowed = backtick_tokens(&c[2]);
-            if !allowed.is_empty() {
-                push(Rule::Layer {
-                    module: c[1].to_string(),
-                    allowed,
+        // Run the rule regexes per *sentence*, not per logical line, so a rule
+        // can't match across a sentence boundary in a joined paragraph and a
+        // hedge that leads a later sentence ("…enforced. If `api` must not
+        // import `db`, use the port.") still suppresses it.
+        for line in sentences(line) {
+            if hedged(line) {
+                continue;
+            }
+            // Either side may be a backticked list ("`ui`, `cli` must not import
+            // `db` or `cache`") — fan out to the cross product of operands.
+            for c in forbid_edge_re().captures_iter(line) {
+                for from in backtick_tokens(&c[1]) {
+                    for to in backtick_tokens(&c[2]) {
+                        push(Rule::ForbidEdge {
+                            from: from.clone(),
+                            to,
+                        });
+                    }
+                }
+            }
+            for c in never_edge_re().captures_iter(line) {
+                for from in backtick_tokens(&c[1]) {
+                    for to in backtick_tokens(&c[2]) {
+                        push(Rule::ForbidEdge {
+                            from: from.clone(),
+                            to,
+                        });
+                    }
+                }
+            }
+            // "`domain` must not transitively/indirectly reach `infra`" — a path,
+            // not just a direct edge. Checked before the direct verbs so the
+            // transitive marker is consumed here rather than left dangling.
+            for c in forbid_reach_re().captures_iter(line) {
+                push(Rule::ForbidReach {
+                    from: c[1].to_string(),
+                    to: c[2].to_string(),
                 });
             }
-        }
-        for c in forbid_symbol_re().captures_iter(line) {
-            push(Rule::ForbidSymbol {
-                symbol: c[1].to_string(),
-                except: except_modules(line),
-            });
+            // "`db` must not be imported by `api`" — reverse direction (api -> db).
+            for c in forbid_by_re().captures_iter(line) {
+                push(Rule::ForbidEdge {
+                    from: c[2].to_string(),
+                    to: c[1].to_string(),
+                });
+            }
+            // "`domain` is independent of `infra`" — independence means *no path*,
+            // not just no direct edge, so it compiles to symmetric ForbidReach
+            // (which subsumes the direct edges).
+            for c in independent_re().captures_iter(line) {
+                push(Rule::ForbidReach {
+                    from: c[1].to_string(),
+                    to: c[2].to_string(),
+                });
+                push(Rule::ForbidReach {
+                    from: c[2].to_string(),
+                    to: c[1].to_string(),
+                });
+            }
+            for c in depends_nothing_re().captures_iter(line) {
+                push(Rule::Layer {
+                    module: c[1].to_string(),
+                    allowed: Vec::new(),
+                });
+            }
+            for c in only_depends_re().captures_iter(line) {
+                let allowed = backtick_tokens(&c[2]);
+                if !allowed.is_empty() {
+                    push(Rule::Layer {
+                        module: c[1].to_string(),
+                        allowed,
+                    });
+                }
+            }
+            for c in forbid_symbol_re().captures_iter(line) {
+                push(Rule::ForbidSymbol {
+                    symbol: c[1].to_string(),
+                    except: except_modules(line),
+                });
+            }
         }
     }
     rules
@@ -121,9 +148,12 @@ pub fn extract_bare_rules(
     modules: &HashSet<String>,
 ) -> Vec<SourcedRule> {
     let mut rules = Vec::new();
-    for (i, line) in markdown.lines().enumerate() {
-        let line = quoted_re().replace_all(line, "");
+    for (i, line, _) in logical_lines(markdown) {
+        let line = quoted_re().replace_all(&line, "");
         let line = line.as_ref();
+        if hedged(line) {
+            continue;
+        }
         let origin = format!("{doc_path}:{} [bare]", i + 1);
 
         let mut push = |from: &str, to: &str, transitive: bool| {
@@ -147,11 +177,16 @@ pub fn extract_bare_rules(
             });
         };
 
-        for c in bare_reach_re().captures_iter(line) {
-            push(&c[1], &c[2], true);
-        }
-        for c in bare_edge_re().captures_iter(line) {
-            push(&c[1], &c[2], false);
+        for line in sentences(line) {
+            if hedged(line) {
+                continue;
+            }
+            for c in bare_reach_re().captures_iter(line) {
+                push(&c[1], &c[2], true);
+            }
+            for c in bare_edge_re().captures_iter(line) {
+                push(&c[1], &c[2], false);
+            }
         }
     }
     rules
@@ -272,6 +307,84 @@ fn canonical_operand(op: &str, modules: &HashSet<String>) -> Option<String> {
     None
 }
 
+/// Join soft-wrapped prose lines into logical lines so a rule split across a
+/// hard line break ("`controllers` must not\nimport `db`") still matches.
+/// Returns `(0-based first physical line, joined text, is_fenced)`. A line is
+/// only appended to its predecessor when the predecessor is unfenced prose that
+/// doesn't end a sentence, and the line itself doesn't start a new block
+/// (blank, heading, list item, blockquote, table row, fence).
+fn logical_lines(markdown: &str) -> Vec<(usize, String, bool)> {
+    let fenced = crate::extract::fenced_lines(markdown);
+    let mut out: Vec<(usize, String, bool)> = Vec::new();
+    for (i, line) in markdown.lines().enumerate() {
+        let trimmed = line.trim();
+        let block_start = trimmed.is_empty()
+            || trimmed.starts_with(['#', '-', '*', '+', '>', '|'])
+            || trimmed.starts_with("```")
+            || trimmed.starts_with("~~~")
+            || list_number_re().is_match(trimmed);
+        if let Some((_, prev, prev_fenced)) = out.last_mut() {
+            let prev_open = !*prev_fenced
+                && !prev.trim().is_empty()
+                && !prev.trim_end().ends_with(['.', '!', '?', ':', ';']);
+            if prev_open && !fenced[i] && !block_start {
+                prev.push(' ');
+                prev.push_str(trimmed);
+                continue;
+            }
+        }
+        out.push((i, line.to_string(), fenced[i]));
+    }
+    out
+}
+
+/// Split a logical line into sentences on `.`/`!`/`?` followed by whitespace.
+/// Deliberately naive: rule operands never contain a terminator-then-space
+/// (`app.core`, versions like `1.75`, and paths have no internal space), so
+/// over-splitting can only *prevent* a cross-sentence match, never break a real
+/// rule apart. Abbreviations like `e.g.` are already handled by the whole-line
+/// hedge check before this runs.
+fn sentences(text: &str) -> Vec<&str> {
+    let mut out = Vec::new();
+    let mut start = 0;
+    for m in sentence_split_re().find_iter(text) {
+        out.push(text[start..m.start()].trim());
+        start = m.end();
+    }
+    let tail = text[start..].trim();
+    if !tail.is_empty() {
+        out.push(tail);
+    }
+    out.retain(|s| !s.is_empty());
+    out
+}
+
+fn sentence_split_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| Regex::new(r"[.!?]\s+").unwrap())
+}
+
+/// Conditional/historical/illustrative context in which a rule-shaped sentence
+/// is not a stated rule.
+fn hedged(line: &str) -> bool {
+    hedge_re().is_match(line)
+}
+
+fn hedge_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(
+            r"(?i)\b(?:previously|used\s+to|no\s+longer|historically|for\s+example|for\s+instance|e\.g\.)\b|^\s*(?:if|unless|suppose)\b",
+        )
+        .unwrap()
+    })
+}
+
+fn list_number_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| Regex::new(r"^\d+[.)]\s").unwrap())
+}
+
 /// All backtick-quoted tokens in a string.
 fn backtick_tokens(s: &str) -> Vec<String> {
     backtick_re()
@@ -292,12 +405,16 @@ fn except_modules(line: &str) -> Vec<String> {
 
 // ---- prose patterns -------------------------------------------------------
 
+/// A backticked operand, or a comma/or/and-joined list of them
+/// ("`db` or `cache`", "`ui`, `cli`"). Extracted with [`backtick_tokens`].
+const OPERAND_LIST: &str = r"`[^`]+`(?:(?:\s*,\s*|\s*,?\s+(?:or|and)\s+)`[^`]+`)*";
+
 fn forbid_edge_re() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
-        Regex::new(
-            r"(?:(?:modules?|code|files?|classes|components?|anything)\s+(?:in|under|within)\s+)?`([^`]+)`(?:\s+(?:layer|module|package|crate|component))?\s+(?:(?:must|should|may|can|does|do)\s+not|cannot|can'?t)\s+(?:imports?\s+(?:anything\s+)?from|import|imports|depend\s+on|depends\s+on|use|uses|reference|references|access|accesses|touch|touches|calls?\s+into)\s+(?:the\s+)?`([^`]+)`",
-        )
+        Regex::new(&format!(
+            r"(?:(?:modules?|code|files?|classes|components?|anything)\s+(?:in|under|within)\s+)?({OPERAND_LIST})(?:\s+(?:layer|module|package|crate|component)s?)?\s+(?:(?:must|should|may|can|does|do)\s+not|cannot|can'?t)\s+(?:imports?\s+(?:anything\s+)?from|import|imports|depend\s+on|depends\s+on|use|uses|reference|references|access|accesses|touch|touches|calls?\s+into)\s+(?:the\s+)?({OPERAND_LIST})",
+        ))
         .unwrap()
     })
 }
@@ -305,9 +422,9 @@ fn forbid_edge_re() -> &'static Regex {
 fn never_edge_re() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
-        Regex::new(
-            r"`([^`]+)`(?:\s+(?:layer|module|package|crate|component))?\s+(?:(?:must|should|may|can)\s+)?never\s+(?:imports?|depends?\s+on|uses?|references?)\s+(?:the\s+)?`([^`]+)`",
-        )
+        Regex::new(&format!(
+            r"({OPERAND_LIST})(?:\s+(?:layer|module|package|crate|component)s?)?\s+(?:(?:must|should|may|can)\s+)?never\s+(?:imports?|depends?\s+on|uses?|references?)\s+(?:the\s+)?({OPERAND_LIST})",
+        ))
         .unwrap()
     })
 }
