@@ -1,5 +1,5 @@
 # OSS repos for wild false-positive audits (owner/name). Diversity of language
-# and idiom matters more than count; see the constswap/diagram audit notes.
+# and idiom matters more than count. Probe one clone at a time with planted_drift.py.
 pydantic/pydantic
 fastapi/fastapi
 apache/airflow

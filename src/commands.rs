@@ -160,10 +160,27 @@ fn load_dependency_names(dir: &Path) -> HashSet<String> {
                 out.insert(tail.to_string());
             }
             out.extend(installed_bins(dir, name));
+            if let Some((_, bins)) = KNOWN_BINS.iter().find(|(pkg, _)| pkg == name) {
+                out.extend(bins.iter().map(|b| b.to_string()));
+            }
         }
     }
     out
 }
+
+/// Common packages whose binary name differs from the package name, for repos
+/// checked without `node_modules` (CI checkouts, fresh clones).
+const KNOWN_BINS: &[(&str, &[&str])] = &[
+    ("@changesets/cli", &["changeset"]),
+    ("typescript", &["tsc"]),
+    ("@playwright/test", &["playwright"]),
+    ("@nestjs/cli", &["nest"]),
+    ("@angular/cli", &["ng"]),
+    ("npm-run-all", &["run-s", "run-p"]),
+    ("npm-run-all2", &["run-s", "run-p"]),
+    ("@biomejs/biome", &["biome"]),
+    ("@graphql-codegen/cli", &["graphql-codegen"]),
+];
 
 /// Binary names an installed dependency declares (`@changesets/cli` ships
 /// `changeset`). ponytail: only sees installed deps; without `node_modules`
