@@ -571,16 +571,17 @@ mod tests {
 
     #[test]
     fn prose_independent_is_symmetric() {
+        // Independence means no *path* either way, so it compiles to reach rules.
         let md = "`domain` is independent of `infra`.";
         let kinds: Vec<Rule> = extract_prose_rules(md, "ARCH.md")
             .into_iter()
             .map(|s| s.rule)
             .collect();
-        assert!(kinds.contains(&Rule::ForbidEdge {
+        assert!(kinds.contains(&Rule::ForbidReach {
             from: "domain".into(),
             to: "infra".into()
         }));
-        assert!(kinds.contains(&Rule::ForbidEdge {
+        assert!(kinds.contains(&Rule::ForbidReach {
             from: "infra".into(),
             to: "domain".into()
         }));
