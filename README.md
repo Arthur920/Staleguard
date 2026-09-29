@@ -81,7 +81,7 @@ staleguard check --fail-on-regression
 A reusable action installs the binary and runs the check for you:
 
 ```yaml
-- uses: Arthur920/Staleguard@v0.3.0
+- uses: Arthur920/Staleguard@v0.4.0
   with:
     args: --fail-on-regression       # passed through to `staleguard check`
 ```
@@ -90,7 +90,7 @@ To get findings as inline PR annotations and entries in the **Security → Code
 scanning** tab, emit SARIF and upload it:
 
 ```yaml
-- uses: Arthur920/Staleguard@v0.3.0
+- uses: Arthur920/Staleguard@v0.4.0
   id: staleguard
   with:
     format: sarif
@@ -121,7 +121,7 @@ Run the deterministic check locally whenever a doc changes, via
 ```yaml
 # .pre-commit-config.yaml
 - repo: https://github.com/Arthur920/Staleguard
-  rev: v0.3.0
+  rev: v0.4.0
   hooks:
     - id: staleguard
 ```

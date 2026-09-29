@@ -1,7 +1,7 @@
 # Pre-commit integration. In a consuming repo, add to .pre-commit-config.yaml:
 #
 #   - repo: https://github.com/Arthur920/Staleguard
-#     rev: v0.3.0
+#     rev: v0.4.0
 #     hooks:
 #       - id: staleguard
 #
