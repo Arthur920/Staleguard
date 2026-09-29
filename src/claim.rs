@@ -43,14 +43,6 @@ impl Provenance {
         }
     }
 
-    /// A claim anchored to one or more modules.
-    pub fn modules(mods: impl IntoIterator<Item = String>) -> Provenance {
-        Provenance {
-            modules: mods.into_iter().collect(),
-            ..Default::default()
-        }
-    }
-
     /// A claim anchored to a single file path.
     pub fn path(p: impl Into<String>) -> Provenance {
         Provenance {

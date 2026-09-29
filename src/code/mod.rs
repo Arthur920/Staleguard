@@ -127,16 +127,6 @@ impl CodeIndex {
         }
     }
 
-    /// The set of real internal module paths (symbol modules + edge sources).
-    /// Used to ground architecture-rule operands.
-    pub fn module_set(&self) -> HashSet<String> {
-        self.symbols
-            .iter()
-            .map(|s| s.module.clone())
-            .chain(self.edges.iter().map(|e| e.from_module.clone()))
-            .collect()
-    }
-
     /// Number of distinct symbols that reference `qualified_name`: the
     /// per-symbol risk signal for coverage-gaps, and the basis for the
     /// dead-code-vs-undocumented distinction.

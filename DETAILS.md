@@ -11,25 +11,9 @@ This page covers what staleguard detects, how it works, and how it performs. For
 - env vars and CLI flags documented but never read in the code
 - qualified code refs (`module::symbol`, `Type.method`) that resolve to no symbol
 
-**Architecture violations**: rules parsed straight from prose and checked against
-the real import graph.
-- forbidden imports: "`controllers` must not import `db`" (direct edge). Add
-  "transitively", "indirectly", or "reach" ("`controllers` must not transitively
-  import `db`") to forbid *any* import chain, not only a direct one. The
-  violation names the offending path.
-- layering: "`domain` depends on nothing", "`api` may only depend on `domain`"
-- independence: "`core` is independent of `infra`"
-- forbidden symbols: "no direct `os.environ` outside `config`" (text scan plus
-  resolved references)
-
 **Coverage gaps**
 - public code surface that no doc describes, risk-ranked by fan-in, churn, and
   complexity
-
-**Diagram coherence**
-- Mermaid flowcharts diffed against the real import graph to find phantom
-  edges, stale boxes, and missing arrows
-- Mermaid class diagrams checked against real types and methods
 
 **Drift over time**
 - `--diff <ref>` re-checks only what changed since a git ref
@@ -38,7 +22,7 @@ the real import graph.
   behind it changes
 
 Everything is deterministic and tuned to under-report rather than false-alarm:
-a finding always points at a concrete path, command, symbol, or import edge.
+a finding always points at a concrete path, command, env var, flag, or symbol.
 Underneath sits a **drift ledger**: it makes runs incremental, scores
 alignment, and gates CI on regressions.
 
@@ -52,7 +36,6 @@ staleguard check --doc README.md # restrict to one doc (cheaper)
 
 staleguard index                 # code symbols + module/reference edges (tree-sitter)
 staleguard coverage              # public code surface that no doc describes
-staleguard rules                 # audit architecture rules parsed from prose
 ```
 
 Output is `text` (human) or `json` (machine-readable). `check` exits non-zero on

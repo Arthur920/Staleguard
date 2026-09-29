@@ -5,20 +5,15 @@ mod claim;
 mod code;
 mod commands;
 mod config;
-mod constswap;
 mod coverage;
-mod diagram;
 mod drift;
 mod entrypoints;
 mod extract;
 mod findings;
 mod git;
 mod report;
-mod rules;
 mod sarif;
 mod settings;
-#[cfg(test)]
-mod testutil;
 mod verify;
 
 use code::CodeIndex;
@@ -52,7 +47,6 @@ Examples:
   staleguard check --format sarif   SARIF for GitHub code scanning / PR annotations
   staleguard check --write-ledger   set the CI alignment baseline on the base branch
   staleguard index                  print code symbols + module/reference edges
-  staleguard rules                  audit architecture rules parsed from doc prose
   staleguard coverage               public code surface no doc describes
 
 Run `staleguard <command> --help` for per-command options.";
@@ -95,17 +89,6 @@ enum Commands {
     },
     /// Extract and print the code index (symbols + dependency edges).
     Index {
-        /// Repo root (default: cwd).
-        #[arg(default_value = ".")]
-        path: PathBuf,
-        /// Output format.
-        #[arg(long, value_enum, default_value_t = Format::Text)]
-        format: Format,
-    },
-    /// Audit which architecture rules are extracted from doc prose, and how each
-    /// fares against the code, so silent misses (a rule that didn't parse, or an
-    /// operand that grounds to no real module) become visible.
-    Rules {
         /// Repo root (default: cwd).
         #[arg(default_value = ".")]
         path: PathBuf,
@@ -234,24 +217,13 @@ fn run_check(
     // The repo's path list, walked once, so each doc's path claims match in
     // memory instead of re-walking the whole tree per claim.
     let repo_files = verify::repo_paths(root);
-    // The repo's internal module paths, computed once and shared; diagram
-    // grounding needs it per embedded diagram, so building it here avoids
-    // re-cloning every module name into a fresh set per documentation file.
-    let modules = index.module_set();
-
     let ctx = check::CheckContext {
         root,
-        index: &index,
         grounding: &grounding,
         code_tokens: &code_tokens,
         repo_files: &repo_files,
-        modules: &modules,
     };
     let doc_checks = check::doc_checks();
-
-    // Architecture rules: prose-sourced, accumulated per doc, then verified once
-    // (the symbol scan walks the whole repo).
-    let mut arch_rules: Vec<rules::SourcedRule> = Vec::new();
 
     let mut findings = Vec::new();
     for doc_path in collect_docs_filtered(root, doc_filter) {
@@ -280,9 +252,7 @@ fn run_check(
         for c in doc_checks {
             findings.extend(c.check(&doc, &ctx));
         }
-        arch_rules.extend(rules::extract_prose_rules(&doc.text, &doc.rel));
     }
-    findings.extend(rules::check(&arch_rules, &index, root));
 
     // Code -> doc coverage gaps: undocumented public surface, anchored to its
     // symbol so it scores as its own dimension of the alignment score. This is a
@@ -340,32 +310,6 @@ fn main() -> ExitCode {
             let index = CodeIndex::build(&root);
             report::report_index(&index, format);
             ExitCode::SUCCESS
-        }
-        Commands::Rules { path, format } => {
-            let root = std::fs::canonicalize(&path).unwrap_or(path);
-            let index = CodeIndex::build(&root);
-            let mut sourced = Vec::new();
-            for doc in collect_docs(&root) {
-                if let Ok(text) = std::fs::read_to_string(&doc) {
-                    let rel = doc
-                        .strip_prefix(&root)
-                        .unwrap_or(&doc)
-                        .to_string_lossy()
-                        .to_string();
-                    sourced.extend(rules::extract_prose_rules(&text, &rel));
-                }
-            }
-            let rows = rules::audit(&sourced, &index, &root);
-            report::report_rules(&rows, format);
-            // A violated rule is real drift; exit non-zero so CI/agents notice.
-            let violated = rows
-                .iter()
-                .any(|r| matches!(r.status, rules::RuleStatus::Violated(_)));
-            if violated {
-                ExitCode::FAILURE
-            } else {
-                ExitCode::SUCCESS
-            }
         }
         Commands::Coverage { path, format } => {
             let root = std::fs::canonicalize(&path).unwrap_or(path);

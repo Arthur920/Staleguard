@@ -23,8 +23,20 @@ fn changed(items: &[&str]) -> HashSet<String> {
 #[test]
 fn lineage_dirty_when_anchor_changed() {
     let set = changed(&["src/api"]);
-    assert!(is_dirty(&Provenance::modules(["src/api".into()]), &set));
-    assert!(!is_dirty(&Provenance::modules(["src/db".into()]), &set));
+    assert!(is_dirty(
+        &Provenance {
+            modules: vec!["src/api".into()],
+            ..Default::default()
+        },
+        &set
+    ));
+    assert!(!is_dirty(
+        &Provenance {
+            modules: vec!["src/db".into()],
+            ..Default::default()
+        },
+        &set
+    ));
     // Ungrounded claims are always dirty (can't be carried forward).
     assert!(is_dirty(&Provenance::default(), &set));
     // Path anchors match by file path.
@@ -59,7 +71,14 @@ fn run_writes_ledger_and_score_and_treats_all_dirty_without_git() {
     let dir = tmp("write");
     let index = CodeIndex::default();
     let claims = vec![
-        Finding::supported("a", "doc.md:1", Provenance::modules(["m".into()])),
+        Finding::supported(
+            "a",
+            "doc.md:1",
+            Provenance {
+                modules: vec!["m".into()],
+                ..Default::default()
+            },
+        ),
         Finding::problem(Verdict::Stale, "b", "doc.md:2", "stale"),
     ];
     let opts = Options {

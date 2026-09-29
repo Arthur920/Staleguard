@@ -141,10 +141,4 @@ impl Finding {
         self.provenance = provenance;
         self
     }
-
-    /// Attach code references (builder style).
-    pub fn with_refs(mut self, code_refs: Vec<String>) -> Finding {
-        self.code_refs = code_refs;
-        self
-    }
 }

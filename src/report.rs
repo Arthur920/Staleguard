@@ -8,7 +8,6 @@
 use crate::code::CodeIndex;
 use crate::drift;
 use crate::findings::Finding;
-use crate::rules;
 
 use clap::ValueEnum;
 
@@ -88,86 +87,6 @@ pub(crate) fn report_check(out: &drift::Outcome, format: Format) {
             );
             if let Some((base, head)) = out.regression {
                 println!("\u{2717} score regressed: {base:.3} (base) -> {head:.3} (head)");
-            }
-        }
-    }
-}
-
-/// Print the architecture-rule audit: every rule extracted from doc prose, where
-/// it came from, and its status (holds / violated / skipped-ungrounded). This is
-/// the visibility layer over the otherwise-silent prose extractor.
-pub(crate) fn report_rules(rows: &[rules::AuditRow], format: Format) {
-    let format = downgrade_sarif(format, "rules");
-    match format {
-        Format::Sarif => unreachable!(),
-        Format::Json => {
-            let payload: Vec<_> = rows
-                .iter()
-                .map(|r| {
-                    let (status, detail) = match &r.status {
-                        rules::RuleStatus::Holds => ("holds", serde_json::Value::Null),
-                        rules::RuleStatus::Violated(n) => {
-                            ("violated", serde_json::json!({ "violations": n }))
-                        }
-                        rules::RuleStatus::Ungrounded(op) => {
-                            ("ungrounded", serde_json::json!({ "operand": op }))
-                        }
-                    };
-                    serde_json::json!({
-                        "rule": r.rule.describe(),
-                        "origin": r.origin,
-                        "status": status,
-                        "detail": detail,
-                    })
-                })
-                .collect();
-            println!("{}", serde_json::to_string_pretty(&payload).unwrap());
-        }
-        Format::Text => {
-            if rows.is_empty() {
-                println!("no architecture rules extracted from doc prose.");
-                println!(
-                    "(rules must be written with both operands in backticks, e.g. \
-                     \"`api` must not import `db`\".)"
-                );
-                return;
-            }
-            let (mut holds, mut violated, mut ungrounded) = (0, 0, 0);
-            for r in rows {
-                let (mark, note) = match &r.status {
-                    rules::RuleStatus::Holds => {
-                        holds += 1;
-                        ("\u{2713} holds    ", String::new())
-                    }
-                    rules::RuleStatus::Violated(n) => {
-                        violated += 1;
-                        ("\u{2717} VIOLATED ", format!("  ({n} violation(s))"))
-                    }
-                    rules::RuleStatus::Ungrounded(op) => {
-                        ungrounded += 1;
-                        (
-                            "\u{26a0} skipped  ",
-                            format!("  (`{op}` matches no real module)"),
-                        )
-                    }
-                };
-                println!(
-                    "{}  {:<30}{}  [{}]",
-                    mark,
-                    r.rule.describe(),
-                    note,
-                    r.origin
-                );
-            }
-            println!(
-                "\n{} rule(s): {holds} hold, {violated} violated, {ungrounded} skipped (ungrounded)",
-                rows.len()
-            );
-            if ungrounded > 0 {
-                println!(
-                    "note: skipped rules are not enforced; fix the operand name so it \
-                     matches a real module, or the rule is silently ignored."
-                );
             }
         }
     }

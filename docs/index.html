@@ -491,7 +491,7 @@
     <div class="hero-tag stagger"><span class="dot"></span><span>fully local · offline · zero false positives</span></div>
     <h1 class="stagger">Stale<span class="em">guard</span></h1>
     <div class="hero-sub stagger">Guard your docs against drift</div>
-    <p class="hero-desc stagger">Catches the places where your <strong>CLAUDE.md</strong>, READMEs, <code>*.md</code> docs, and <strong>architecture diagrams</strong> claim something the code no longer backs up. Checks docs and Mermaid diagrams against the <strong>actual codebase</strong> and reports what's stale, wrong, or missing.</p>
+    <p class="hero-desc stagger">Catches the places where your <strong>CLAUDE.md</strong>, READMEs, and <code>*.md</code> docs claim something the code no longer backs up. Checks docs against the <strong>actual codebase</strong> and reports what's stale, wrong, or missing.</p>
     <div class="install-line stagger">
       <code><span class="sigil">$ </span>brew install Arthur920/tap/staleguard</code>
       <button class="copy-btn" data-copy="brew install Arthur920/tap/staleguard">COPY</button>
@@ -516,7 +516,7 @@
       <div class="layer-num">I</div>
       <div class="layer-body">
         <h3>Deterministic</h3>
-        <p>Paths exist? Commands real? Config keys present? Architecture rules parsed from prose, checked against the real import graph. It uses no ML and is tuned for zero false positives.</p>
+        <p>Paths exist? Commands real? Env vars and flags read? Code symbols defined? It uses no ML and is tuned for zero false positives.</p>
       </div>
       <div class="layer-meta">instant · no model<span class="accent">~1.2s on 330k LOC</span></div>
     </div>
@@ -526,17 +526,17 @@
     <div class="l1-step">
       <div class="k"><b>01</b>Read docs</div>
       <h4>Extract claims</h4>
-      <p>Scan every <code>*.md</code> for concrete assertions: paths, commands, env vars, flags, code symbols, and architecture rules written in prose.</p>
+      <p>Scan every <code>*.md</code> for concrete assertions: paths, commands, env vars, flags, and code symbols.</p>
     </div>
     <div class="l1-step">
       <div class="k"><b>02</b>Read code</div>
       <h4>Index with tree-sitter</h4>
-      <p>Parse the repo in parallel into a ground-truth index: symbols, references, and the real module import graph.</p>
+      <p>Parse the repo in parallel into a ground-truth index: symbols and references.</p>
     </div>
     <div class="l1-step">
       <div class="k"><b>03</b>Compare</div>
       <h4>Resolve each claim</h4>
-      <p>Check every claim against the index; run prose architecture rules against the import graph. Each claim either resolves or it doesn't.</p>
+      <p>Check every claim against the index. Each claim either resolves or it doesn't.</p>
     </div>
     <div class="l1-step">
       <div class="k"><b>04</b>Report</div>
@@ -553,7 +553,7 @@
 <!-- DETECT -->
 <section id="detect" class="wrap">
   <p class="eyebrow reveal">What it catches</p>
-  <h2 class="section-title reveal">Five classes of documentation drift</h2>
+  <h2 class="section-title reveal">Three classes of documentation drift</h2>
 
   <div class="feat-grid stagger">
     <div class="feat">
@@ -567,30 +567,11 @@
       </ul>
     </div>
     <div class="feat">
-      <span class="glyph">// ARCHITECTURE</span>
-      <h3>Architecture violations</h3>
-      <ul>
-        <li>forbidden imports: "controllers must not import db"</li>
-        <li>layering: "domain depends on nothing"</li>
-        <li>independence: "core is independent of infra"</li>
-        <li>forbidden symbols outside their allowed module</li>
-      </ul>
-    </div>
-    <div class="feat">
       <span class="glyph">// COVERAGE</span>
       <h3>Coverage gaps</h3>
       <ul>
         <li>public code surface that no doc describes</li>
         <li>risk-ranked by fan-in, churn, and complexity</li>
-      </ul>
-    </div>
-    <div class="feat">
-      <span class="glyph">// DIAGRAMS</span>
-      <h3>Diagram coherence</h3>
-      <ul>
-        <li>Mermaid flowcharts diffed against the real import graph</li>
-        <li>Mermaid class diagrams checked against real types</li>
-        <li>phantom edges, stale boxes, missing arrows</li>
       </ul>
     </div>
     <div class="feat">

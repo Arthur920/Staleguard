@@ -18,11 +18,11 @@ against the actual codebase and reports what's stale, wrong, or missing.
 
 Everything runs locally and offline. It is **deterministic** (no model, no API) and
 tuned for **zero false positives**. Every finding points at a concrete path,
-command, symbol, or import edge that the docs got wrong.
+command, env var, flag, or symbol that the docs got wrong.
 
 Findings cover broken references (paths, commands, env vars, flags, code
-symbols), architecture-rule violations parsed from prose, undocumented public
-surface, and stale diagrams. A CI alignment score tracks drift over time.
+symbols) and undocumented public surface. A CI alignment score tracks drift
+over time.
 [DETAILS.md](DETAILS.md) has the full breakdown.
 
 <p align="center">
@@ -32,8 +32,7 @@ surface, and stale diagrams. A CI alignment score tracks drift over time.
 ## How it works
 
 Staleguard checks paths, commands, config keys, env vars, flags, and code
-symbols named in your docs against the real codebase, compares architecture
-rules parsed from prose with the actual import graph, and reports only what it
+symbols named in your docs against the real codebase and reports only what it
 can prove wrong. It is fully deterministic (no models, no network) and runs in
 ~1.2s on a 330k-line repo.
 
