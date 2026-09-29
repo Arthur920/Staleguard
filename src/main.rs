@@ -14,6 +14,7 @@ mod git;
 mod report;
 mod sarif;
 mod settings;
+mod suggest;
 mod verify;
 
 use code::CodeIndex;
@@ -324,6 +325,7 @@ fn run_check(
             findings.extend(c.check(&doc, &ctx));
         }
     }
+    suggest::annotate(&mut findings, root, &repo_files, &code_tokens, &pkg_scripts);
 
     // Code -> doc coverage gaps: undocumented public surface, anchored to its
     // symbol so it scores as its own dimension of the alignment score. This is a

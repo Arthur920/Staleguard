@@ -33,7 +33,9 @@ over time.
 
 Staleguard checks paths, commands, config keys, env vars, flags, and code
 symbols named in your docs against the real codebase and reports only what it
-can prove wrong. It is fully deterministic (no models, no network) and runs in
+can prove wrong. Where it can, a finding says what the docs probably meant:
+`Did you mean \`src/api/client.ts\`?` from git rename history, or the closest
+defined script or identifier. It is fully deterministic (no models, no network) and runs in
 ~1.2s on a 330k-line repo.
 
 ## Install

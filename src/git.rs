@@ -6,7 +6,7 @@
 //! narrowing optimization *behind* the full scan, so under-reporting a change
 //! only means "re-check more," never "miss a check".
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::io::Write;
 use std::path::Path;
 use std::process::{Command, Stdio};
@@ -212,6 +212,35 @@ pub fn file_change_history(root: &Path, max_commits: usize) -> Vec<Vec<String>> 
         commits.push(current);
     }
     commits
+}
+
+/// `old → new` for every file rename in the last 2000 commits. Newest wins
+/// when a path was renamed more than once.
+pub fn renames(root: &Path) -> HashMap<String, String> {
+    let Some(text) = git(
+        root,
+        &[
+            "log",
+            "-2000",
+            "-M",
+            "--diff-filter=R",
+            "--name-status",
+            "--format=",
+        ],
+    ) else {
+        return HashMap::new();
+    };
+    let mut map = HashMap::new();
+    for line in text.lines() {
+        let mut cols = line.split('\t');
+        if let (Some(status), Some(old), Some(new)) = (cols.next(), cols.next(), cols.next()) {
+            if status.starts_with('R') {
+                map.entry(old.to_string())
+                    .or_insert_with(|| new.to_string());
+            }
+        }
+    }
+    map
 }
 
 #[cfg(test)]
