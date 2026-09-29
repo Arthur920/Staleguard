@@ -283,6 +283,8 @@ pub fn command_lines(markdown: &str) -> Vec<(usize, String)> {
 }
 
 fn push_subcommands(raw: &str, lineno: usize, out: &mut Vec<(usize, String)>) {
+    // Drop a trailing shell comment: `npm run seed  # via the root alias`.
+    let raw = raw.split(" #").next().unwrap_or(raw);
     for part in chain_split_re().split(raw) {
         let mut cmd = part.trim();
         cmd = cmd.strip_prefix("$ ").unwrap_or(cmd).trim();
@@ -541,13 +543,14 @@ mod tests {
         fs::write(dir.join("package.json"), r#"{"name":"x","scripts":{}}"#).unwrap();
         let m = Manifests::load(&dir);
         let repo: HashSet<String> = ["preview".to_string()].into();
-        let md = "`npm run preview` `npm run gone`";
+        let md = "`npm run preview` \n```sh\nnpm run gone   # a comment\n```";
         let flagged: Vec<_> = check(md, "README.md", &m, &repo)
             .into_iter()
             .filter(|f| f.verdict.is_reportable())
             .collect();
         assert_eq!(flagged.len(), 1);
         assert!(flagged[0].detail.contains("`gone`"));
+        assert!(!flagged[0].detail.contains('#'));
     }
 
     #[test]
