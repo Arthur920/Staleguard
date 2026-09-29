@@ -60,13 +60,13 @@ pub struct Hit {
     pub path: String,
     pub start_line: usize,
     pub score: f32,
-    /// Chunk body — the evidence the Layer 3 judge ([`crate::judge`]) reads.
+    /// Chunk body: the evidence the Layer 3 judge ([`crate::judge`]) reads.
     pub text: String,
 }
 
 // ---- chunking -------------------------------------------------------------
 
-/// Overlapping line-window chunks — the fallback when a file yields no symbols.
+/// Overlapping line-window chunks: the fallback when a file yields no symbols.
 fn window_chunks(path: &str, lines: &[&str], base_line: usize, out: &mut Vec<Chunk>) {
     if lines.is_empty() {
         return;
@@ -151,7 +151,7 @@ fn collect_chunks(repo_root: &Path, index: &CodeIndex) -> Vec<Chunk> {
             .to_string_lossy()
             .to_string();
         // Docs describe the library's own API, so tests/benchmarks/examples are
-        // noise as *evidence* — and on a real repo they are ~half the corpus, the
+        // noise as *evidence*, and on a real repo they are ~half the corpus, the
         // dominant embedding cost. Drop them from the retrieval set (the symbol
         // index still sees them). Disable with `STALEGUARD_EMBED_INCLUDE_TESTS=1`.
         if !include_tests() && is_non_library(&rel) {

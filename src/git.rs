@@ -2,7 +2,7 @@
 //!
 //! Everything here degrades safely: a non-git directory, a missing base ref, or
 //! shallow history makes each function return `None`/empty, and the caller falls
-//! back to a full scan. We never crash and never invent a result — lineage is a
+//! back to a full scan. We never crash and never invent a result; lineage is a
 //! narrowing optimization *behind* the full scan, so under-reporting a change
 //! only means "re-check more," never "miss a check".
 
@@ -62,7 +62,7 @@ fn parse_diff(text: &str) -> Vec<FileDiff> {
     let mut files: Vec<FileDiff> = Vec::new();
     for line in text.lines() {
         if let Some(rest) = line.strip_prefix("diff --git ") {
-            // `a/<old> b/<new>` — take the new-side path as the default.
+            // `a/<old> b/<new>`; take the new-side path as the default.
             let path = rest
                 .split(" b/")
                 .nth(1)

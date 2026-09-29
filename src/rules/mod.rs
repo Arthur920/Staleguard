@@ -1,11 +1,11 @@
 //! Layer 1: architecture-rule fitness functions.
 //!
-//! Docs constantly state architectural invariants — "`controllers` must not
+//! Docs constantly state architectural invariants: "`controllers` must not
 //! import `db`", "`domain` depends on nothing", "no direct use of `eval`".
 //! These are negative/absence claims the other checks can't see. We
 //! [`extract`](self::extract) such rules from doc prose, compile each to a
 //! dependency-graph or source query, and [`verify`](self::verify) it against the
-//! resolved module graph. A violation is a hard `contradicted` verdict — no ML.
+//! resolved module graph. A violation is a hard `contradicted` verdict; no ML.
 //! [`audit`](self::audit) reuses the same checks for the dry-run `rules` report.
 //!
 //! Zero false positives: a rule whose module operands don't resolve to any real
@@ -80,7 +80,7 @@ pub struct SourcedRule {
 // ---- shared matching helpers ----------------------------------------------
 
 /// A module path matches an operand by exact equality, subtree prefix
-/// (`op/…`), leaf suffix (`…/op`), or interior segment (`…/op/…`) — so a
+/// (`op/…`), leaf suffix (`…/op`), or interior segment (`…/op/…`), so a
 /// conceptual name (`controllers`) matches a real path (`src/controllers`).
 pub(crate) fn matches(module: &str, operand: &str) -> bool {
     let op = operand.trim_matches('/');
@@ -516,8 +516,8 @@ mod tests {
 
     #[test]
     fn prose_forbid_symbol_no_direct_use_of() {
-        // "no direct use of `X`" — a very common phrasing that previously fell
-        // between the `no direct` and `no use of` branches and silently dropped.
+        // "no direct use of `X`" is a very common phrasing that sits between the
+        // `no direct` and `no use of` branches; it must not be silently dropped.
         for md in [
             "There must be no direct use of `process.env` outside `config`.",
             "no raw usage of `os.environ`",
@@ -761,7 +761,7 @@ mod tests {
              precision={precision:.3} recall={recall:.3}"
         );
 
-        // Zero-FP is the Layer-1 contract — any extracted rule not in gold is a
+        // Zero-FP is the Layer-1 contract; any extracted rule not in gold is a
         // hard failure, with the offending sentences named.
         assert!(
             fp == 0,

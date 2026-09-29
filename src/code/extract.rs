@@ -82,7 +82,7 @@ fn symbols_and_refs(
     // enclosing lookup below. Definition ranges cover the body (the tag node is
     // the whole `function_item`/`class` etc.), unlike `Tag.span` (name only).
     let mut defs: Vec<(Range<usize>, String)> = Vec::new();
-    // (referenced name, byte position) — enclosing symbol resolved after the loop.
+    // (referenced name, byte position); enclosing symbol resolved after the loop.
     let mut ref_sites: Vec<(String, usize)> = Vec::new();
 
     for tag in tags {

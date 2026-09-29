@@ -32,7 +32,7 @@ jobs:
       - name: Test
         run: cargo test
 
-      # The ml feature pulls heavy ONNX deps. Run its tests too — they are
+      # The ml feature pulls heavy ONNX deps. Run its tests too; they are
       # model-free (the Layer-3 decision-rule eval, label/softmax/grounding
       # units), so they exercise Layer 2-3 logic without downloading the 121 MB
       # model. Any model-backed end-to-end checks are #[ignore]d and skipped.
@@ -58,7 +58,7 @@ jobs:
       # checks doc-vs-code drift (broken refs, contradictions, stale claims) and
       # skips the repo-wide coverage pass. Non-blocking because the docs mention
       # example filenames (package.json, CLAUDE.md) that exist in *user* repos,
-      # not this one — findings are surfaced in the log without gating CI.
+      # not this one; findings are surfaced in the log without gating CI.
       - name: Check docs against code
         run: staleguard check --doc README.md --doc DETAILS.md --format json
         continue-on-error: true

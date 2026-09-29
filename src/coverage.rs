@@ -1,19 +1,19 @@
 //! Coverage gaps: the code → doc traversal (Layer 1, deterministic).
 //!
-//! The inverse of `verify` — instead of checking a doc claim against the code,
+//! The inverse of `verify`: instead of checking a doc claim against the code,
 //! it starts from the code's public surface and asks whether any doc describes
 //! it. A public symbol whose name appears in no doc is an `undocumented` gap.
 //!
 //! Scope: public surface only; "documented" means
 //! the name appears as a token anywhere in any doc (loose presence, fewest false
-//! positives). Gaps are never suppressed — they are **risk-ranked** by a
+//! positives). Gaps are never suppressed: they are **risk-ranked** by a
 //! composite of fan-in, churn, branch-count, and a net-new (no-co-changed-doc)
 //! signal, so the riskiest undocumented surface surfaces first. A public symbol
 //! with no callers and no doc still flags (it may be a true public entry point),
 //! just ranked last. `term-drift` and `under-documented` remain Layer 2/3.
 //!
-//! The `coverage-gaps.md` §2 fourth quadrant — a doc names a symbol that *exists
-//! but nothing calls* ("removed feature") — is deliberately **not** emitted here:
+//! The `coverage-gaps.md` §2 fourth quadrant, where a doc names a symbol that *exists
+//! but nothing calls* ("removed feature"), is deliberately **not** emitted here:
 //! at Layer 1 it is indistinguishable from a legitimate public entry point
 //! (binaries' true API has fan-in 0 too), so flagging it would break the zero-FP
 //! stance. That semantic call is deferred to the Layer-3 judge. A doc naming a
@@ -40,7 +40,7 @@ fn ident_re() -> &'static Regex {
 }
 
 /// Extract code → doc coverage gaps for a repo (the standalone `coverage`
-/// subcommand path — builds its own index).
+/// subcommand path; it builds its own index).
 pub fn run(repo_root: &Path) -> Vec<Finding> {
     let index = CodeIndex::build(repo_root);
     let history = git::file_change_history(repo_root, coupling::MAX_COMMITS);
@@ -63,7 +63,7 @@ pub fn gaps(index: &CodeIndex, repo_root: &Path, history: &[Vec<String>]) -> Vec
 struct RiskSignals {
     /// repo-relative file path -> number of commits it changed in (churn).
     churn: HashMap<String, usize>,
-    /// code files no doc has ever co-changed with — the net-new gap signal.
+    /// code files no doc has ever co-changed with: the net-new gap signal.
     no_codoc: HashSet<String>,
 }
 
@@ -111,7 +111,7 @@ struct Gap<'a> {
     sym: &'a Symbol,
     fan_in: usize,
     churn: usize,
-    /// Branch count — a free cyclomatic-complexity proxy from the facts walk.
+    /// Branch count: a free cyclomatic-complexity proxy from the facts walk.
     complexity: usize,
     net_new: bool,
 }
@@ -157,14 +157,14 @@ fn finding_for(g: Gap) -> Finding {
     let s = g.sym;
     let kind = kind_label(&s.kind);
     // Soft reachability hint: a zero-caller public symbol is either dead code or
-    // a true entry point. We don't suppress it — just flag the signal and let it
+    // a true entry point. We don't suppress it; just flag the signal and let it
     // rank last.
     let reach = if g.fan_in == 0 {
         "no internal callers".to_string()
     } else {
         format!("fan-in {}", g.fan_in)
     };
-    // Net-new is the strongest signal — a fresh public surface no doc tracks.
+    // Net-new is the strongest signal: a fresh public surface no doc tracks.
     let lead = if g.net_new {
         "new public surface, no doc has tracked it; "
     } else {

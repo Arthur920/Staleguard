@@ -2,7 +2,7 @@
 //!
 //! A `Finding` doubles as a *claim record*: it carries the doc assertion, the
 //! [`Provenance`] it is anchored to in code, and a [`Verdict`]. A `Supported`
-//! finding is a claim that verified — it is recorded in the drift ledger and
+//! finding is a claim that verified; it is recorded in the drift ledger and
 //! counted in the alignment score, but filtered out of the human report. Every
 //! other verdict is a reportable problem.
 

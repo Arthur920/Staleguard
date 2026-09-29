@@ -30,7 +30,7 @@ pub fn repo_paths(root: &Path) -> Vec<String> {
 
 /// Does `raw` resolve to a repo path? Either it stats directly under `repo_root`
 /// (handles dirs, `./`-prefixed and absolute paths) or some pre-walked repo path
-/// ends with it *on a segment boundary* — so a doc naming `auth.ts` matches
+/// ends with it *on a segment boundary*, so a doc naming `auth.ts` matches
 /// `src/auth.ts` but not `src/oauth.ts`. The boundary check is what stops a stale
 /// path from being silently treated as present.
 fn path_exists(raw: &str, repo_root: &Path, repo_files: &[String]) -> bool {
@@ -51,11 +51,10 @@ fn path_exists(raw: &str, repo_root: &Path, repo_files: &[String]) -> bool {
 /// invalidate them when that file changes.
 ///
 /// A claim exists if `repo_root/c.raw` resolves on disk (a single stat, which
-/// handles directories, `./`-prefixed and absolute paths exactly as before) or
+/// handles directories, `./`-prefixed and absolute paths) or
 /// any pre-walked repo path in `repo_files` ends with it (the suffix case, e.g.
 /// a doc naming `index.ts` for `src/index.ts`). Both are memoized so repeated
-/// claims cost nothing; the only thing removed versus the old code is the
-/// full-tree re-walk that ran once per claim.
+/// claims cost nothing and the tree is never re-walked per claim.
 pub fn check_paths(claims: &[PathClaim], repo_root: &Path, repo_files: &[String]) -> Vec<Finding> {
     // Existence per distinct token, memoized (one stat / suffix scan each).
     let mut exists: HashMap<&str, bool> = HashMap::new();
@@ -77,8 +76,8 @@ pub fn check_paths(claims: &[PathClaim], repo_root: &Path, repo_files: &[String]
     }
     let mut migrated: HashSet<(&str, usize, &str)> = HashSet::new();
     for group in by_line.values() {
-        // Only table rows — a prose line listing several paths must not silently
-        // drop a genuinely-stale one.
+        // Only table rows; a prose line listing several paths must not silently
+        // drop a stale one.
         let is_table = group.iter().all(|c| c.table_row);
         if is_table && group.len() >= 2 && group.iter().any(|c| exists[c.raw.as_str()]) {
             for c in group {
@@ -102,7 +101,7 @@ pub fn check_paths(claims: &[PathClaim], repo_root: &Path, repo_files: &[String]
             ));
         } else if c.historical || migrated.contains(&(c.doc_path.as_str(), c.line, c.raw.as_str()))
         {
-            // Named as deleted / renamed / replaced — its absence confirms the
+            // Named as deleted / renamed / replaced: its absence confirms the
             // doc rather than contradicting it, so emit nothing (zero-FP).
             continue;
         } else {
@@ -170,7 +169,7 @@ mod tests {
     #[test]
     fn deleted_path_in_deletion_context_is_not_flagged() {
         // A plan documenting a removal names a file that (correctly) does not
-        // exist — its absence confirms the doc, so no stale finding.
+        // exist; its absence confirms the doc, so no stale finding.
         let dir = scratch_dir("deleted");
         let md = "**Delete**\n\n- `src/old/handler.ts`\n\n`src/old/handler.ts` no longer exists.";
         let claims = extract_path_claims(md, "PLAN.md");
@@ -183,7 +182,7 @@ mod tests {
 
     #[test]
     fn migration_row_old_path_is_not_flagged() {
-        // `| old | new |`: new exists, old doesn't — the old side is the
+        // `| old | new |`: new exists, old doesn't; the old side is the
         // migration source and must not be flagged stale.
         let dir = scratch_dir("migration");
         fs::create_dir_all(dir.join("src/common/query")).unwrap();
@@ -207,7 +206,7 @@ mod tests {
 
     #[test]
     fn prose_line_listing_paths_still_flags_a_stale_one() {
-        // Two paths in *prose* (not a table): a genuinely missing one must not be
+        // Two paths in *prose* (not a table): a missing one must not be
         // suppressed by the migration-row heuristic.
         let dir = scratch_dir("prose");
         fs::create_dir_all(dir.join("src")).unwrap();
@@ -247,7 +246,7 @@ mod tests {
     #[test]
     fn cue_word_inside_filename_does_not_self_suppress() {
         // A stale path whose own name contains a cue word (`deleted`, `legacy`)
-        // must still be flagged — the cue scan ignores the path token itself.
+        // must still be flagged; the cue scan ignores the path token itself.
         let dir = scratch_dir("cuename");
         let md = "The handler lives in `src/deleted_items.ts`.";
         let claims = extract_path_claims(md, "README.md");

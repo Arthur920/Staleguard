@@ -1,6 +1,6 @@
 //! Types produced by the code extractor.
 //!
-//! These are the substrate every designed feature reads from — coverage gaps,
+//! These are the substrate every designed feature reads from: coverage gaps,
 //! diagram edge-diff, architecture rules, drift provenance/fingerprints.
 
 use std::sync::Arc;
@@ -45,7 +45,7 @@ pub struct Span {
 }
 
 impl Span {
-    /// An empty span — the `body_span` fallback for synthetic symbols and the
+    /// An empty span: the `body_span` fallback for synthetic symbols and the
     /// serde default if a `Symbol` is ever deserialized.
     #[allow(dead_code)]
     pub fn zero() -> Span {
@@ -57,7 +57,7 @@ impl Span {
     }
 }
 
-/// Behavioral facts — the deterministic, model-free fingerprint of a symbol's
+/// Behavioral facts: the deterministic, model-free fingerprint of a symbol's
 /// meaning. The drift layer hashes these (see `crate::code::facts::facts_hash`)
 /// and flags a claim when the hash moves from its committed baseline, catching
 /// small-token/high-semantic edits (`3 -> 5`, `if -> if !`) while ignoring
@@ -89,7 +89,7 @@ pub struct Symbol {
     pub visibility: Visibility,
     /// file-derived module path (e.g. `src/code/symbol` for this file).
     pub module: String,
-    /// Name range (identifier position) — used by reports and coverage.
+    /// Name range (identifier position), used by reports and coverage.
     pub span: Span,
     /// Full definition range (covers the body). Drift maps git hunks to symbols
     /// by overlapping changed line ranges against this. Defaults to `span` for
@@ -106,7 +106,7 @@ pub struct Symbol {
     /// preserves order and repetition.
     #[serde(default)]
     pub calls: Vec<String>,
-    /// For an `Enum`, its variant names — the ground truth state-diagram grounding
+    /// For an `Enum`, its variant names: the ground truth state-diagram grounding
     /// checks against. Empty for non-enums (and for languages whose enum-variant
     /// shape we don't extract yet).
     #[serde(default)]
@@ -128,7 +128,7 @@ pub struct DepEdge {
 /// Endpoints are `Arc<str>` rather than `String`: the same qualified name recurs
 /// across many edges (a hot callee, or a caller that references many symbols), so
 /// interning them into shared allocations keeps the reference graph linear in
-/// *distinct symbols* instead of duplicating long names per edge — what kept a
+/// *distinct symbols* instead of duplicating long names per edge, which is what kept a
 /// large Python repo (litellm) from OOMing. Serializes as the plain string (serde
 /// `rc` feature), so the `index` dump shape is unchanged.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]

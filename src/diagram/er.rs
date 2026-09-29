@@ -2,7 +2,7 @@
 //! and grounds entities + attributes against the repo's SQL [`Schema`].
 //!
 //! The weakest-grounded diagram kind, so it is the most conservative: it only
-//! runs when a `.sql` schema exists, and — mirroring the class check — flags an
+//! runs when a `.sql` schema exists, and (mirroring the class check) flags an
 //! **attribute** only on an entity that *grounds* to a real table (an unmatched
 //! entity may simply be a model our SQL-only extractor didn't see, so it is left
 //! alone). Relationships/cardinality are not checked (Layer 2/3).
@@ -82,7 +82,7 @@ fn parse(body: &str) -> Option<Vec<EntityDecl>> {
             current = Some(idx);
             continue;
         }
-        // Relationship: `A ||--o{ B : label` — registers both entities.
+        // Relationship: `A ||--o{ B : label`; registers both entities.
         if let Some(c) = rel_re().captures(line) {
             ensure(&mut entities, &c[1]);
             ensure(&mut entities, &c[2]);
@@ -99,7 +99,7 @@ fn parse(body: &str) -> Option<Vec<EntityDecl>> {
     (!entities.is_empty()).then_some(entities)
 }
 
-/// The attribute name of an ER member line — the second whitespace token
+/// The attribute name of an ER member line: the second whitespace token
 /// (`string firstName` -> `firstName`). `None` if the line has fewer than two.
 fn attr_name(line: &str) -> Option<String> {
     let mut it = line.split_whitespace();
@@ -111,7 +111,7 @@ fn diff(entities: &[EntityDecl], schema: &Schema, origin: &str) -> Vec<Finding> 
     let mut out = Vec::new();
     for e in entities {
         let Some(table) = schema.entity(&e.name) else {
-            continue; // unmatched entity — may be an unextracted model; skip
+            continue; // unmatched entity; may be an unextracted model; skip
         };
         let prov = Provenance::path(format!("schema:{}", table.name));
         let cols: HashSet<&str> = table.fields.iter().map(String::as_str).collect();

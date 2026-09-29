@@ -124,7 +124,7 @@ for i in range(0, len(names)-1, 2):
     bpairs.append((names[i], names[i+1]))
 # bare grounds case-insensitively but emits real segment; keep operands lowercase & plain (no dots/dashes that break token regex boundaries are fine, but '.' splits? token is [a-z][\w.-]* so dots/dashes allowed). Avoid 'app.core' as subject start fine.
 # Bare operands must ground AND survive the BARE_STOPWORDS denylist, so drop any
-# name that collides with a stopword (e.g. "entities") — those are negatives, not
+# name that collides with a stopword (e.g. "entities"); those are negatives, not
 # positives, for the bare extractor.
 BARE_STOPWORDS = {"entities","entity","module","modules","layer","layers","package",
  "packages","crate","crates","component","components","code","library","libraries",

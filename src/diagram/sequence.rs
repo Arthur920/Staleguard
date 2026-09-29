@@ -1,7 +1,7 @@
 //! Ordered (sequence) diagram parsing: Mermaid `sequenceDiagram` and PlantUML
 //! sequence diagrams. Unlike the graph-shaped formats these are an **ordered
 //! list of messages**, so they are aligned (not set-diffed) against the code's
-//! ordered call sequence — see [`super::align`].
+//! ordered call sequence; see [`super::align`].
 //!
 //! Parsing is deliberately tolerant: a line that doesn't look like a
 //! participant declaration or an `A -> B : msg` message is skipped, so control
@@ -22,7 +22,7 @@ pub struct Message {
 }
 
 impl Message {
-    /// The leading identifier of the message label — its candidate call name
+    /// The leading identifier of the message label: its candidate call name
     /// (`validate()` -> `validate`, `login(user)` -> `login`). Prose labels with
     /// no leading identifier yield the trimmed label, which simply won't match a
     /// real call (keeping the alignment zero-FP).
@@ -86,7 +86,7 @@ fn parse_body(body: &str, origin: &str) -> Option<Sequence> {
             continue;
         }
         if let Some(c) = participant_re().captures(line) {
-            // `participant X` / `participant "X" as y` / `actor X` — the alias
+            // `participant X` / `participant "X" as y` / `actor X`; the alias
             // (last group) is the id edges use, else the bare name.
             let id = c.get(2).map(|m| m.as_str()).unwrap_or(&c[1]);
             register(id.trim_matches('"').trim(), &mut participants);

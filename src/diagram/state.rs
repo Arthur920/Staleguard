@@ -6,7 +6,7 @@
 //! single enum whose variants its states best match (clearing [`MIN_GROUND`] and
 //! at least half the states); a diagram that grounds to no enum emits nothing.
 //! **Transitions** are not deterministically groundable (a transition table
-//! isn't extracted) and are deferred to the Layer-3 judge — only the state set is
+//! isn't extracted) and are deferred to the Layer-3 judge; only the state set is
 //! checked here. PlantUML state diagrams are not yet parsed.
 
 use std::collections::HashSet;

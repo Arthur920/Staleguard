@@ -2,7 +2,7 @@
 //!
 //! Catches the one drift class the Layer-3 NLI judge is measurably worst at:
 //! a doc that binds a *named symbol* to a *specific literal* that the code no
-//! longer backs — "`port` defaults to 8080" while the code says
+//! longer backs: "`port` defaults to 8080" while the code says
 //! `unwrap_or(5432)`. These minimal-pair, one-token logic flips are exactly the
 //! adversarial cases the cross-encoder reads as supported (it leans on lexical
 //! overlap), so handling them symbolically here both raises recall and keeps the
@@ -18,14 +18,14 @@
 //!
 //! Integers, bools, and (delimited) strings are compared. A string claim only
 //! counts when the prose value is itself delimited (backticked/quoted) and both
-//! sides are "plain" — no interpolation, format placeholders, or escapes — since
+//! sides are "plain" (no interpolation, format placeholders, or escapes) since
 //! those have no statically-knowable value to contradict. A code-side string is
 //! further required to be a single whitespace-free token (a docstring or message
 //! is not a value) and not equal to the symbol's own name (a self-referential
 //! accessor key is not a default). Bool spellings are matched case-insensitively
 //! so a delimited `True`/`False` is typed as a bool, not a string.
 //!
-//! If the symbol has several competing literals, or none, we stay silent — an
+//! If the symbol has several competing literals, or none, we stay silent; an
 //! ambiguous body is "unverifiable", never "contradicted".
 
 use std::sync::OnceLock;
@@ -85,11 +85,11 @@ pub fn check(markdown: &str, doc_path: &str, index: &CodeIndex) -> Vec<Finding> 
 
 /// Pull `(symbol, value)` claims out of prose. Two phrasings, both anchored on a
 /// backticked identifier so we never guess at what an English noun refers to:
-///   * `` `SYM` <cue> <value> `` — "`port` defaults to 8080"
-///   * `` `SYM` = <value> ``     — "`retries` = 3"
+///   * `` `SYM` <cue> <value> ``: "`port` defaults to 8080"
+///   * `` `SYM` = <value> ``: "`retries` = 3"
 fn extract_claims(markdown: &str, doc_path: &str) -> Vec<ConstClaim> {
     let mut out = Vec::new();
-    // Lines inside ``` / ~~~ fences are code samples, not prose claims — a
+    // Lines inside ``` / ~~~ fences are code samples, not prose claims; a
     // literal `secret_key="..."` there is an example, not a statement about the
     // symbol's default. Skipping them keeps us inside the zero-FP regime, exactly
     // as the path and config passes do.
@@ -101,7 +101,7 @@ fn extract_claims(markdown: &str, doc_path: &str) -> Vec<ConstClaim> {
         for caps in claim_re().captures_iter(line) {
             // A backticked identifier is always an intended code anchor. A bare
             // one is only trusted when its *shape* is unambiguously code
-            // (`SCREAMING_SNAKE`, `snake_case`, `camelCase`) — a plain English
+            // (`SCREAMING_SNAKE`, `snake_case`, `camelCase`); a plain English
             // word like "report" or "Default" is rejected, which is where bare
             // matching would otherwise invent false anchors.
             let symbol = match (caps.name("bsym"), caps.name("psym")) {
@@ -137,7 +137,7 @@ fn extract_claims(markdown: &str, doc_path: &str) -> Vec<ConstClaim> {
 /// `<identifier> <cue> <value>` where the cue is an explicit default /
 /// assignment phrase. The identifier is either backticked (`bsym`) or bare
 /// (`psym`, later shape-filtered); the value may itself be backticked. We
-/// deliberately keep the cue list closed — "is" alone is too loose and would
+/// deliberately keep the cue list closed; "is" alone is too loose and would
 /// match prose like "`port` is configurable".
 ///
 /// Note `(?i)` is intentionally *not* set here: the identifier groups must stay
@@ -174,7 +174,7 @@ fn claim_re() -> &'static Regex {
 }
 
 /// Normalize a *bare* matched literal to `Facts.constants` shape, or `None` if
-/// it isn't a type we trust un-delimited (only integers and bools — floats carry
+/// it isn't a type we trust un-delimited (only integers and bools; floats carry
 /// too much formatting variance, and a bare word is never read as a string).
 /// Delimited values go through [`parse_delimited`], which also handles strings.
 fn parse_value(raw: &str) -> Option<Value> {
@@ -195,7 +195,7 @@ fn parse_value(raw: &str) -> Option<Value> {
 /// Normalize a *delimited* prose value (one written inside backticks or quotes,
 /// so the author clearly meant a literal). A delimited value that parses as an
 /// int/bool is treated as such; otherwise it is a string, but only a "plain"
-/// one — we refuse interpolated/escaped content (`${x}`, `{0}`, `\n`) since its
+/// one; we refuse interpolated/escaped content (`${x}`, `{0}`, `\n`) since its
 /// runtime value isn't statically knowable, which would risk a false contradiction.
 fn parse_delimited(raw: &str) -> Option<Value> {
     if let Some(v) = parse_value(raw) {
@@ -207,7 +207,7 @@ fn parse_delimited(raw: &str) -> Option<Value> {
     None
 }
 
-/// A string with no interpolation/format/escape machinery — safe to compare for
+/// A string with no interpolation/format/escape machinery, which is safe to compare for
 /// exact equality. Rejects empty/whitespace-only content too.
 fn is_plain_string(s: &str) -> bool {
     !s.trim().is_empty() && !s.chars().any(|c| matches!(c, '\\' | '{' | '}' | '$'))
@@ -215,7 +215,7 @@ fn is_plain_string(s: &str) -> bool {
 
 /// Strip a string literal's optional prefix (r, f, b, rb, …) and one matching
 /// pair of surrounding quotes (double, single, or backtick), returning the inner
-/// content — or `None` if `c` isn't a recognizable, plain string literal.
+/// content, or `None` if `c` isn't a recognizable, plain string literal.
 fn unquote_code_string(c: &str) -> Option<String> {
     let c = c.trim();
     // Skip a short ascii-alpha prefix that precedes the opening quote.
@@ -272,7 +272,7 @@ fn check_claim(claim: &ConstClaim, index: &CodeIndex) -> Option<Finding> {
         .filter(|s| name_matches(&s.name, &claim.symbol))
         .collect();
     if matched.is_empty() {
-        return None; // nothing to compare against — not our job to flag.
+        return None; // nothing to compare against; not our job to flag.
     }
 
     // (2) the distinct literals of the claimed *type* across those symbols.
@@ -282,7 +282,7 @@ fn check_claim(claim: &ConstClaim, index: &CodeIndex) -> Option<Finding> {
             if let Some(v) = constant_of_kind(c, &claim.value) {
                 // A string literal identical to the symbol's own name is a
                 // self-referential accessor key (`get file -> _get("file")`), not
-                // a configured default — skip it. (The vite `file` getter FP.)
+                // a configured default; skip it. (The vite `file` getter FP.)
                 if matches!(claim.value, Value::Str(_))
                     && v.eq_ignore_ascii_case(&format!("\"{}\"", s.name))
                 {
@@ -296,7 +296,7 @@ fn check_claim(claim: &ConstClaim, index: &CodeIndex) -> Option<Finding> {
     }
 
     let want = claim.value.render();
-    // Already correct — record as supported (ledgered + scored, not reported).
+    // Already correct; record as supported (ledgered + scored, not reported).
     if observed.contains(&want) {
         return Some(Finding::supported(
             claim.phrase.clone(),
@@ -354,7 +354,7 @@ fn constant_of_kind(constant: &str, want: &Value) -> Option<String> {
 /// Whether a *bare* (un-backticked) token is unambiguously code-shaped, and so
 /// safe to treat as a symbol anchor. True for `snake_case`, `SCREAMING_SNAKE`,
 /// `SCREAMINGCASE` (≥2 letters, all caps), and `camelCase`. False for plain
-/// English words (`port`, `report`, `Default`) — those need backticks, since a
+/// English words (`port`, `report`, `Default`); those need backticks, since a
 /// lone lowercase or Capitalized word is where bare matching invents false
 /// anchors.
 fn is_code_shaped(s: &str) -> bool {
@@ -363,7 +363,7 @@ fn is_code_shaped(s: &str) -> bool {
     }
     let has_upper = s.chars().any(|c| c.is_ascii_uppercase());
     let has_lower = s.chars().any(|c| c.is_ascii_lowercase());
-    // ALLCAPS (PORT, HTTP2) — all-uppercase with at least two letters.
+    // ALLCAPS (PORT, HTTP2): all-uppercase with at least two letters.
     if has_upper && !has_lower && s.chars().filter(|c| c.is_ascii_alphabetic()).count() >= 2 {
         return true;
     }
@@ -381,7 +381,7 @@ fn is_code_shaped(s: &str) -> bool {
 }
 
 /// Case-insensitive identifier match, tolerating a `DEFAULT_`/`_DEFAULT` affix on
-/// the code side (`DEFAULT_PORT` vs the doc's `port`). Exact otherwise — we never
+/// the code side (`DEFAULT_PORT` vs the doc's `port`). Exact otherwise; we never
 /// substring-match, which would invite false anchors.
 fn name_matches(code_name: &str, claimed: &str) -> bool {
     let a = code_name.to_ascii_lowercase();
@@ -538,7 +538,7 @@ mod tests {
 
     #[test]
     fn interpolated_string_value_is_silent() {
-        // a format/interpolated literal has no static value — never contradict.
+        // a format/interpolated literal has no static value; never contradict.
         let idx = index_of(vec![sym("greeting", &["\"hello ${name}\""])]);
         assert!(verdicts("`greeting` defaults to `hello world`", &idx).is_empty());
         // and an interpolated *prose* value is rejected at extraction.
@@ -685,7 +685,7 @@ mod tests {
             "precision regression: {fp} false contradiction(s)\n{}",
             leaks.join("\n")
         );
-        // Recall floor — ratchet up as the extractor improves.
+        // Recall floor; ratchet up as the extractor improves.
         assert!(
             recall >= 0.90,
             "recall regression: {recall:.3} < 0.90 floor (tp={tp} fn={fn_})\n{}",
@@ -695,7 +695,7 @@ mod tests {
 
     #[test]
     fn fenced_code_sample_is_not_a_claim() {
-        // an assignment inside a ``` block is example code, not a prose claim —
+        // an assignment inside a ``` block is example code, not a prose claim;
         // even though its shape matches, we must not ground it (this is the
         // fastapi `secret_key="supersecret"` wild false positive).
         let idx = index_of(vec![sym("secret_key", &["\"realdefault\""])]);
@@ -709,7 +709,7 @@ mod tests {
         // not ground a string value claim. This is the pydantic `serialize_as_any`
         // wild false positive: prose "set to `True`" vs a body that is just a
         // docstring. Capitalized `True` is now typed as a bool, and the docstring
-        // is rejected as a string value — both guards independently silence it.
+        // is rejected as a string value; both guards independently silence it.
         let idx = index_of(vec![sym(
             "serialize_as_any",
             &["\"The serialize_as_any argument set during serialization.\""],
@@ -727,7 +727,7 @@ mod tests {
     #[test]
     fn self_referential_key_is_not_a_value() {
         // the vite `file` getter: its lone string literal is its own accessor key
-        // (`_get("file")`), equal to the symbol name — not a default. A hypothetical
+        // (`_get("file")`), equal to the symbol name, not a default. A hypothetical
         // "If `file` is `'foo/bar'`" must not contradict it.
         let idx = index_of(vec![sym("file", &["\"file\""])]);
         assert!(verdicts("If `file` is `foo/bar`", &idx).is_empty());
@@ -759,7 +759,7 @@ mod tests {
     fn loose_prose_is_not_a_claim() {
         let idx = index_of(vec![sym("port", &["5432"])]);
         // "is configurable" has no value cue; "is 8080" needs the value to be
-        // present — here there's none, so nothing matches.
+        // present; here there's none, so nothing matches.
         assert!(check("`port` is configurable", "README.md", &idx).is_empty());
     }
 }

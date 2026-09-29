@@ -12,7 +12,7 @@
 .env
 .env.*
 
-# Layer-3 holdout sample — third-party OSS snippets, not for redistribution.
+# Layer-3 holdout sample: third-party OSS snippets, not for redistribution.
 # Generate locally with tools/gen_holdout_sample.py (see src/judge.rs).
 nli_holdout_sample.jsonl
 

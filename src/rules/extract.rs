@@ -19,7 +19,7 @@ pub fn extract_prose_rules(markdown: &str, doc_path: &str) -> Vec<SourcedRule> {
     let mut rules = Vec::new();
     for (i, line, fenced) in logical_lines(markdown) {
         // A "rule" inside a fenced code sample is example code, not an enforced
-        // architecture rule — e.g. a `// Don't call X here` comment teaching an
+        // architecture rule, e.g. a `// Don't call X here` comment teaching an
         // API. Only prose states rules.
         if fenced {
             continue;
@@ -52,7 +52,7 @@ pub fn extract_prose_rules(markdown: &str, doc_path: &str) -> Vec<SourcedRule> {
                 continue;
             }
             // Either side may be a backticked list ("`ui`, `cli` must not import
-            // `db` or `cache`") — fan out to the cross product of operands.
+            // `db` or `cache`"); fan out to the cross product of operands.
             for c in forbid_edge_re().captures_iter(line) {
                 for from in backtick_tokens(&c[1]) {
                     for to in backtick_tokens(&c[2]) {
@@ -73,7 +73,7 @@ pub fn extract_prose_rules(markdown: &str, doc_path: &str) -> Vec<SourcedRule> {
                     }
                 }
             }
-            // "`domain` must not transitively/indirectly reach `infra`" — a path,
+            // "`domain` must not transitively/indirectly reach `infra`": a path,
             // not just a direct edge. Checked before the direct verbs so the
             // transitive marker is consumed here rather than left dangling.
             for c in forbid_reach_re().captures_iter(line) {
@@ -82,14 +82,14 @@ pub fn extract_prose_rules(markdown: &str, doc_path: &str) -> Vec<SourcedRule> {
                     to: c[2].to_string(),
                 });
             }
-            // "`db` must not be imported by `api`" — reverse direction (api -> db).
+            // "`db` must not be imported by `api`": reverse direction (api -> db).
             for c in forbid_by_re().captures_iter(line) {
                 push(Rule::ForbidEdge {
                     from: c[2].to_string(),
                     to: c[1].to_string(),
                 });
             }
-            // "`domain` is independent of `infra`" — independence means *no path*,
+            // "`domain` is independent of `infra`": independence means *no path*,
             // not just no direct edge, so it compiles to symmetric ForbidReach
             // (which subsumes the direct edges).
             for c in independent_re().captures_iter(line) {
@@ -129,7 +129,7 @@ pub fn extract_prose_rules(markdown: &str, doc_path: &str) -> Vec<SourcedRule> {
 }
 
 /// EXPERIMENTAL (audit-only): extract dependency rules whose module operands are
-/// *not* backtick-quoted — the dominant real-world phrasing ("the EVSE module
+/// *not* backtick-quoted, the dominant real-world phrasing ("the EVSE module
 /// must not depend on the Station module", "**Repository** layer cannot
 /// reference **Service**"). Backticks are normally required precisely because
 /// they keep precision at 100%; here we instead lean entirely on **grounding**:
@@ -192,7 +192,7 @@ pub fn extract_bare_rules(
     rules
 }
 
-/// Generic prose nouns that are never module names — the denylist that, together
+/// Generic prose nouns that are never module names: the denylist that, together
 /// with grounding, keeps SOLID/RFC/security boilerplate from being read as a
 /// rule. Compared case-insensitively against the bare operand token.
 const BARE_STOPWORDS: &[&str] = &[
@@ -429,7 +429,7 @@ fn never_edge_re() -> &'static Regex {
     })
 }
 
-/// "`X` must not be imported/used/referenced by `Y`" — captures the forbidden
+/// "`X` must not be imported/used/referenced by `Y`"; captures the forbidden
 /// target (1) and the dependent (2); the edge runs Y -> X.
 fn forbid_reach_re() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
@@ -450,7 +450,7 @@ fn forbid_by_re() -> &'static Regex {
     })
 }
 
-/// "`X` is independent of `Y`" / "`X` has no dependency on `Y`" — a symmetric
+/// "`X` is independent of `Y`" / "`X` has no dependency on `Y`": a symmetric
 /// no-edge rule (both directions forbidden).
 fn independent_re() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();

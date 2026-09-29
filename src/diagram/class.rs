@@ -11,9 +11,9 @@
 //! - a **method** drawn under a *grounded* class that exists nowhere in that
 //!   class's module → `Stale` (a reliable "drawn method that's gone" defect);
 //! - a bare class name that grounds to nothing is **not** flagged (could be an
-//!   external type — deferred, like the graph diff's bare-box case);
+//!   external type; deferred, like the graph diff's bare-box case);
 //! - relations (inheritance / association) need type-level edges we don't
-//!   extract — parsed-over, not diffed (Layer 2/3).
+//!   extract, so they are parsed-over, not diffed (Layer 2/3).
 
 use std::collections::{HashMap, HashSet};
 use std::sync::OnceLock;
@@ -127,7 +127,7 @@ fn parse_body(body: &str, origin: &str) -> Option<ClassDiagram> {
 }
 
 /// The method name of a member line (`+isMammal()`, `-save() : bool`), or `None`
-/// for a field (no parens) — fields are ambiguous to name and skipped.
+/// for a field (no parens); fields are ambiguous to name and skipped.
 fn method_name(member: &str) -> Option<String> {
     method_re().captures(member).map(|c| c[1].to_string())
 }
@@ -153,7 +153,7 @@ fn diff(d: &ClassDiagram, index: &CodeIndex) -> Vec<Finding> {
     let mut out = Vec::new();
     for c in &d.classes {
         let Some(sym) = types.get(c.name.as_str()) else {
-            continue; // ungrounded bare name — could be external; not flagged
+            continue; // ungrounded bare name; could be external; not flagged
         };
         let prov = Provenance::symbol(sym.qualified_name.clone());
         out.push(Finding::supported(
@@ -218,7 +218,7 @@ fn inline_re() -> &'static Regex {
 
 fn method_re() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
-    // The identifier immediately before `(` — visibility markers/types ignored.
+    // The identifier immediately before `(`; visibility markers/types ignored.
     RE.get_or_init(|| Regex::new(r"([A-Za-z_]\w*)\s*\(").unwrap())
 }
 

@@ -1,11 +1,11 @@
-//! Grounding a diagram box label to a real module — the deterministic exact tier
+//! Grounding a diagram box label to a real module: the deterministic exact tier
 //! plus a dependency-free *fuzzy* tier for conceptual labels.
 //!
 //! Real architecture diagrams label boxes conceptually ("Auth Service", "API
 //! Gateway"), which never ground to a module *path* by exact/prefix/suffix match.
 //! That is why the high-value phantom-edge and missing-arrow checks fired zero
 //! times across a 10-repo wild audit. Fuzzy resolution bridges that gap by token
-//! overlap — but it is admitted only when it is **unique and significant** so
+//! overlap, but it is admitted only when it is **unique and significant** so
 //! Layer 1 keeps under-reporting rather than guessing. Ambiguity resolves to
 //! [`Resolution::None`].
 
@@ -17,7 +17,7 @@ use crate::rules::matches;
 ///
 /// The edge checks (phantom, missing-arrow) require a box to name **exactly one**
 /// module: `Exact` and `Fuzzy` each carry that unique module path. A label that
-/// matches several modules is `Ambiguous` — enough to know the box is *not* a
+/// matches several modules is `Ambiguous`: enough to know the box is *not* a
 /// stale reference, but too imprecise to assert an edge about (so it can't drive a
 /// phantom/missing-arrow false positive). This is what the wild audit demanded:
 /// `matches` is segment/suffix-based, so a short label like `auth` otherwise
@@ -28,13 +28,13 @@ pub(super) enum Resolution {
     Exact(String),
     /// Fuzzily grounds to one module (its unique path).
     Fuzzy(String),
-    /// Grounds to more than one module — real, but no single identity.
+    /// Grounds to more than one module: real, but no single identity.
     Ambiguous,
     None,
 }
 
 impl Resolution {
-    /// True if the box names real code at all (any tier) — so it is not stale.
+    /// True if the box names real code at all (any tier), so it is not stale.
     pub(super) fn grounds(&self) -> bool {
         !matches!(self, Resolution::None)
     }

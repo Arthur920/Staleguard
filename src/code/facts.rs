@@ -1,5 +1,5 @@
 //! Behavioral-fact extraction: a per-symbol AST walk that distills the parts of
-//! a definition that carry meaning — literal constants, control-flow condition
+//! a definition that carry meaning: literal constants, control-flow condition
 //! texts, and the declared return shape. Hashing these (not the source text, and
 //! not an embedding) gives a fingerprint that moves on semantic edits (`3 -> 5`,
 //! `if -> if !`) but not on renames or reformatting. This is the behavioral-fact
@@ -39,7 +39,7 @@ pub fn extract(node: Node, source: &[u8], lang: Language, signature: Option<Stri
     }
 }
 
-/// Facts with only the signature populated — the fallback when the file failed
+/// Facts with only the signature populated: the fallback when the file failed
 /// to parse into a tree, so no AST walk is possible.
 pub fn extract_signature_only(signature: Option<String>) -> Facts {
     Facts {
@@ -86,7 +86,7 @@ fn walk(
     }
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
-        // Don't descend into nested definitions — their facts belong to them.
+        // Don't descend into nested definitions; their facts belong to them.
         if child.id() != node.id() && is_nested_definition(child.kind(), lang) {
             continue;
         }
@@ -155,7 +155,7 @@ fn text(node: Node, source: &[u8]) -> Option<String> {
     node.utf8_text(source).ok().map(|s| s.to_string())
 }
 
-/// Collapse internal whitespace runs and trim — so reflowing a condition or
+/// Collapse internal whitespace runs and trim, so reflowing a condition or
 /// declaration across lines does not change the fingerprint.
 fn normalize(s: &str) -> String {
     s.split_whitespace().collect::<Vec<_>>().join(" ")

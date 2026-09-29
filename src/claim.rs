@@ -1,15 +1,15 @@
-//! Claim identity and provenance — the substrate the drift ledger (Layer 0)
+//! Claim identity and provenance: the substrate the drift ledger (Layer 0)
 //! carries across runs.
 //!
 //! A *claim* is a doc assertion under test; in this codebase a [`Finding`] with
 //! its [`Provenance`] *is* that claim (a `Supported` finding is a claim that
 //! verified). Two pieces are needed beyond what a finding already carries:
 //!
-//! - **Provenance** — which code the claim is anchored to (symbols / modules /
+//! - **Provenance**: which code the claim is anchored to (symbols / modules /
 //!   files). Lineage invalidation walks these: a claim is dirty when any of its
 //!   anchors changed. Symbols are the preferred anchor (they survive moves);
 //!   modules and paths are coarser fallbacks.
-//! - **A stable id** — `fnv1a(doc_path + normalized claim text)`. The ledger is
+//! - **A stable id**: `fnv1a(doc_path + normalized claim text)`. The ledger is
 //!   committed, so the hash must be stable across machines *and* toolchain
 //!   versions; `std::hash::DefaultHasher` guarantees neither, hence the inline
 //!   FNV-1a here.
@@ -18,7 +18,7 @@
 
 use serde::{Deserialize, Serialize};
 
-/// What a claim is anchored to in the code. Empty means "ungrounded" — such a
+/// What a claim is anchored to in the code. Empty means "ungrounded". Such a
 /// claim is always treated as dirty (it can never be carried forward).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Provenance {
@@ -59,14 +59,14 @@ impl Provenance {
         }
     }
 
-    /// Every anchor key, symbols and modules together — what lineage tests
+    /// Every anchor key, symbols and modules together, which is what lineage tests
     /// against the changed-symbol set. (Paths are matched separately, by file.)
     pub fn anchors(&self) -> impl Iterator<Item = &String> {
         self.symbols.iter().chain(self.modules.iter())
     }
 }
 
-/// FNV-1a (64-bit). Deterministic across machines and Rust versions — required
+/// FNV-1a (64-bit). Deterministic across machines and Rust versions, as required
 /// for the committed ledger.
 pub fn fnv1a(s: &str) -> u64 {
     const OFFSET: u64 = 0xcbf2_9ce4_8422_2325;

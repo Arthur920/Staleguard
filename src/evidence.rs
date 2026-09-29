@@ -4,12 +4,12 @@
 //! Layer 1 has often *already* resolved: a claim's backtick tokens are grounded
 //! to exact symbols/modules during extraction ([`crate::judge::candidate_claims`]
 //! -> `ground_claim`). This module turns that grounding into the NLI premise
-//! directly — read the resolved symbol bodies — and falls back to a lexical
+//! directly (read the resolved symbol bodies) and falls back to a lexical
 //! (idf-weighted) match over the public symbol table when a claim grounded to
 //! nothing. No embedding model, no whole-corpus pass.
 //!
 //! Embedding stays available behind `STALEGUARD_EMBED_RETRIEVE=1` for claims whose
-//! relevant code is genuinely semantic (named by behaviour, not by identifier).
+//! relevant code is semantic (named by behaviour, not by identifier).
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -287,7 +287,7 @@ mod tests {
     // ===== Layer-2 retrieval recall harness ==================================
     //
     // The two judge harnesses (src/judge.rs) measure Layer 3 with the *correct*
-    // evidence handed to it. In production that evidence is chosen by Layer 2 —
+    // evidence handed to it. In production that evidence is chosen by Layer 2:
     // grounding + the model-free lexical fallback ([`gather`]) by default, or the
     // embedding retriever behind STALEGUARD_EMBED_RETRIEVE. A perfect judge still
     // returns `unverifiable` if Layer 2 surfaced the wrong code, so the pipeline is
@@ -307,7 +307,7 @@ mod tests {
     const RECALL_K: usize = 5;
 
     /// Fixture library code. Each file is a small module of public symbols with
-    /// doc comments — enough surface for grounding and lexical/embedding retrieval
+    /// doc comments: enough surface for grounding and lexical/embedding retrieval
     /// to have something to match, plus distractors so recall isn't trivial.
     const FIXTURE_FILES: &[(&str, &str)] = &[
         (
@@ -397,7 +397,7 @@ mod tests {
     ];
 
     /// Labelled recall corpus: `(claim, gold_file)`. `gold_file` is the repo file
-    /// whose code actually decides the claim — recall is "did that file surface in
+    /// whose code actually decides the claim; recall is "did that file surface in
     /// the top-k evidence?". Mirrors real docs: some claims name the symbol in
     /// backticks (grounding should resolve them exactly); others describe the
     /// behaviour and backtick a non-symbol word, so the lexical/embedding step has
@@ -562,7 +562,7 @@ mod tests {
             ));
         }
         let (at_k, _at_1) = report("embedding", &hits);
-        // Measured: recall@5 = recall@1 = 1.00 — the semantic retriever even recovers
+        // Measured: recall@5 = recall@1 = 1.00; the semantic retriever even recovers
         // the low-overlap paraphrase the lexical fallback misses. Gate a little under
         // measured so model/version drift trips this rather than corpus noise.
         assert!(

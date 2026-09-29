@@ -6,7 +6,7 @@
 //! is the adoption path for using Staleguard as a CI gate without writing a
 //! custom JSON parser.
 //!
-//! Only `check` produces SARIF — it is the doc-vs-code findings command. The
+//! Only `check` produces SARIF; it is the doc-vs-code findings command. The
 //! other subcommands keep `text`/`json`.
 
 use serde_json::{json, Value};

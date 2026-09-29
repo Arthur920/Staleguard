@@ -18,7 +18,7 @@ use crate::claim::Provenance;
 use crate::findings::{Finding, Verdict};
 
 /// The valid invocation targets the repo declares, per tool. `None` means "no
-/// manifest for this tool" — claims for it are left unchecked.
+/// manifest for this tool"; claims for it are left unchecked.
 #[derive(Debug, Default, Clone)]
 pub struct Manifests {
     npm_scripts: Option<HashSet<String>>,
@@ -38,7 +38,7 @@ impl Manifests {
     }
 
     /// Resolve each manifest from the *nearest* ancestor of `start` (up to and
-    /// including `root`) that declares it — so a `pydantic-core/README.md` is
+    /// including `root`) that declares it, so a `pydantic-core/README.md` is
     /// checked against `pydantic-core/Makefile`, not just the repo-root one. Each
     /// manifest type is located independently (the nearest `Makefile` and the
     /// nearest `Cargo.toml` can sit in different directories). Without this, every

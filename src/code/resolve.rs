@@ -5,7 +5,7 @@
 //! lives in a different namespace than the file-derived `from_module`
 //! (`src/code/symbol`). Architecture-rule checks need a clean module graph, so
 //! this turns each raw import into a candidate repo module path and keeps it
-//! only when it matches a real module — wrong guesses simply resolve to `None`
+//! only when it matches a real module; wrong guesses simply resolve to `None`
 //! and are dropped, which is what keeps the resulting graph correct.
 
 use std::collections::HashSet;
@@ -90,7 +90,7 @@ fn rust_candidates(raw: &str, from_module: &str) -> Vec<String> {
         }
         _ => {
             // A bare path (e.g. `extract::RawRef`) is usually a sibling/child
-            // module declared with `mod x;` in this file — resolve relative to
+            // module declared with `mod x;` in this file; resolve relative to
             // the importing module's directory first, then the crate root, then
             // as written.
             if from.len() > 1 {

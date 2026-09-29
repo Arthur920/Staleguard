@@ -26,7 +26,7 @@ pub enum RuleStatus {
 }
 
 /// One audited rule: what was extracted, where from, and how it fared. This is
-/// the data behind `staleguard rules` — it turns the otherwise-silent prose
+/// the data behind `staleguard rules`; it turns the otherwise-silent prose
 /// extraction into something a user can see and debug.
 #[derive(Debug, Clone)]
 pub struct AuditRow {
@@ -35,7 +35,7 @@ pub struct AuditRow {
     pub status: RuleStatus,
 }
 
-/// Audit every extracted rule against the index without emitting findings —
+/// Audit every extracted rule against the index without emitting findings,
 /// reusing the exact same grounding and graph checks as [`super::check`], so the
 /// report can never disagree with a real run.
 pub fn audit(rules: &[SourcedRule], index: &CodeIndex, repo_root: &Path) -> Vec<AuditRow> {

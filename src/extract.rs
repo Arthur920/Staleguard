@@ -12,7 +12,7 @@ use regex::Regex;
 /// detectors (paths, architecture rules) consult this to skip example code:
 /// a path or rule named inside a code sample illustrates usage, it does not
 /// assert anything about the repo. The command detector deliberately does *not*
-/// use this — commands live in fenced blocks.
+/// use this; commands live in fenced blocks.
 pub fn fenced_lines(markdown: &str) -> Vec<bool> {
     let mut flags = Vec::new();
     let mut in_fence = false;
@@ -40,7 +40,7 @@ pub struct PathClaim {
     pub doc_path: String,
     pub line: usize,
     /// True when the path is named in a context that asserts its *absence* or
-    /// *former* state — a deletion note (`**Delete** … no longer exists`) or a
+    /// *former* state: a deletion note (`**Delete** … no longer exists`) or a
     /// migration "old → new" row. Such references must not yield stale-path
     /// findings: the missing file confirms the doc rather than contradicting it.
     pub historical: bool,
@@ -203,7 +203,7 @@ fn looks_like_path(token: &str) -> bool {
             // A slashless `word.ext` is ambiguous between a file and a dotted code
             // reference (`express.json`, `app.css`). Treat it as a path only when
             // it carries a directory or is a well-known root manifest; otherwise
-            // defer to the symbol resolver — guessing here only ever produced
+            // defer to the symbol resolver; guessing here only ever produced
             // false "path does not exist" findings.
             return has_slash || CANONICAL_FILES.contains(&lower.as_str());
         }
@@ -229,7 +229,7 @@ const CONTEXT_WINDOW: usize = 4;
 
 /// Inline-code spans (`` `...` ``), stripped before cue scanning so a cue word
 /// *inside a path token* (`src/deleted.ts`, `legacy_api.ts`) can't mark its own
-/// path as historical — only surrounding prose counts.
+/// path as historical; only surrounding prose counts.
 fn code_span_re() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| Regex::new(r"`[^`]*`").unwrap())

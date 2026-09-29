@@ -258,7 +258,7 @@ fn fuzzy_box_is_not_stale() {
 #[test]
 fn conceptual_box_does_not_drive_a_phantom() {
     // "Auth Service" fuzzy-resolves to src/auth, but a fuzzy endpoint must NOT
-    // produce a phantom edge — conceptual/behavioral arrows are not import claims
+    // produce a phantom edge; conceptual/behavioral arrows are not import claims
     // (the novu `agent → store` "TodoWrite tap" false positive from the wild audit).
     let index = idx(&[], &["src/auth", "src/web"]);
     let md = mermaid("graph TD\n  a[Auth Service] --> w[Web Module]");

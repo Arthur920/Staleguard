@@ -34,10 +34,10 @@ pub struct CodeIndex {
     /// substrate architecture-rule checks run against.
     pub module_edges: Vec<DepEdge>,
     /// Symbol reference graph keyed by target: `ref_callers[to]` is the distinct
-    /// set of `from` symbols that reference `to`. This replaces a flat
-    /// `Vec<RefEdge>` so [`Self::symbol_fan_in`] is an O(1) lookup rather than an
-    /// O(edges) scan — coverage calls it once per symbol, so the old flat shape
-    /// was O(symbols × edges), the quadratic that hung on large repos (litellm).
+    /// set of `from` symbols that reference `to`. Keying by target makes
+    /// [`Self::symbol_fan_in`] an O(1) lookup. Coverage calls it once per symbol,
+    /// so an O(edges) scan would cost O(symbols × edges), which hangs on large
+    /// repos (litellm).
     /// Each edge also stores one interned `Arc<str>` caller (under its shared
     /// target key) instead of two cloned names. Serializes back to the original
     /// flat `[{from_symbol, to_symbol}]` array under the key `ref_edges`, so the
@@ -86,7 +86,7 @@ pub fn ref_callers_from(
 }
 
 /// Prebuilt symbol lookups shared across the claim-grounding and evidence passes,
-/// so neither re-scans the whole symbol table per claim (the old shape was
+/// so neither re-scans the whole symbol table per claim (that would be
 /// O(claims × symbols)). Borrows the index, so rebuild it if the index changes.
 /// Only the `ml` build's Layer 2/3 uses it.
 #[cfg(feature = "ml")]
@@ -139,7 +139,7 @@ impl<'a> SymbolLookup<'a> {
     }
 
     /// The earliest symbol whose `qualified_name == tok`, `name == tok`, or
-    /// `qualified_name` ends with `::tok` — faithfully matching the original
+    /// `qualified_name` ends with `::tok`, faithfully matching the original
     /// linear `find` (first symbol satisfying any of the three). Tokens that
     /// contain `::` fall back to a scan, since a general suffix match can't be
     /// served by the hashed indexes; such tokens are rare for backtick names.
@@ -197,7 +197,7 @@ impl CodeIndex {
     /// Walk every code file under `repo_root` and extract symbols + edges, then
     /// resolve raw references into symbol-level reference edges across files.
     pub fn build(repo_root: &Path) -> CodeIndex {
-        // Parse files in parallel — each `extract_file` owns its tree-sitter
+        // Parse files in parallel; each `extract_file` owns its tree-sitter
         // parser, so there's no shared state. `collect` into an ordered Vec keeps
         // the merge deterministic (stable symbol order = stable output).
         let files = lang::code_files(repo_root);
@@ -207,7 +207,7 @@ impl CodeIndex {
             .collect();
 
         // Merge symbols/edges into flat Vecs, but keep each file's raw refs in
-        // their own already-allocated Vec rather than concatenating them — the raw
+        // their own already-allocated Vec rather than concatenating them; the raw
         // (pre-resolution) ref set is the largest collection on large repos, and a
         // single flattened copy would double its peak footprint. `resolve_refs`
         // only streams them once, so we hand it a lazy `flatten()` instead.
@@ -245,12 +245,12 @@ impl CodeIndex {
         self.symbols.iter().filter(move |s| s.module == module)
     }
 
-    /// Number of distinct symbols that reference `qualified_name` — the
+    /// Number of distinct symbols that reference `qualified_name`: the
     /// per-symbol risk signal for coverage-gaps, and the basis for the
     /// dead-code-vs-undocumented distinction.
     pub fn symbol_fan_in(&self, qualified_name: &str) -> usize {
         // Callers are deduped per target at construction, so the stored length is
-        // already the distinct-caller count — an O(1) lookup.
+        // already the distinct-caller count, an O(1) lookup.
         self.ref_callers.get(qualified_name).map_or(0, Vec::len)
     }
 }
@@ -304,8 +304,8 @@ fn resolve_module_edges(symbols: &[Symbol], edges: &[DepEdge]) -> Vec<DepEdge> {
 const MAX_DEFS_PER_NAME: usize = 32;
 
 /// Resolve raw references (name + enclosing symbol) into symbol-level edges.
-/// A reference name is matched to every same-named definition (over-approximate
-/// — never under-counts callers), except names with more than
+/// A reference name is matched to every same-named definition (over-approximate,
+/// so it never under-counts callers), except names with more than
 /// [`MAX_DEFS_PER_NAME`] definitions, which are dropped as noise. Self-edges and
 /// duplicate `(from, to)` pairs are dropped.
 ///
@@ -328,7 +328,7 @@ fn resolve_refs(
     // endpoint (linear in symbols), so each emitted edge reuses one allocation
     // rather than cloning two long names. `pool[id]` is the interned name for id.
     // `intern` is a free fn (not a closure capturing `pool`), so its borrow of
-    // `pool` is released at each return — letting us read `pool[id]` in the same
+    // `pool` is released at each return, letting us read `pool[id]` in the same
     // loop and build the caller map in one pass, with no intermediate edge list.
     fn intern(ids: &mut HashMap<Arc<str>, u32>, pool: &mut Vec<Arc<str>>, s: &str) -> u32 {
         if let Some(&i) = ids.get(s) {

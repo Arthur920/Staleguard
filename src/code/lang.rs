@@ -26,7 +26,7 @@ pub const CODE_EXTS: &[&str] = &[
     "cc", "cs", "php", "swift", "kt", "scala", "sh", "toml", "yaml", "yml",
 ];
 
-/// Directories never worth walking — vendored deps, build output, VCS, our own
+/// Directories never worth walking: vendored deps, build output, VCS, our own
 /// cache. Shared by every walker (docs, diagrams, schema, code) so the whole
 /// tool ignores the same junk. Build-output dirs (`dist`, `build`, `.next`, …)
 /// matter especially: they hold minified bundles and generated blobs that carry

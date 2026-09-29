@@ -81,7 +81,7 @@ fn index_emits_json_symbols() {
 
 #[test]
 fn check_flags_undocumented_public_symbol() {
-    // `helper` is public and documented nowhere with no internal callers — a
+    // `helper` is public and documented nowhere with no internal callers, a
     // coverage gap Layer 1 should surface. It is `note`-level, so it is hidden by
     // the default `warning` threshold; `--min-severity note` opts it back in.
     let fx = Fixture::new(&[

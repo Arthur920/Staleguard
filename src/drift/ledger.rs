@@ -60,7 +60,7 @@ impl Ledger {
             .unwrap_or_default()
     }
 
-    /// The most recent commit any record was verified at — the implicit diff
+    /// The most recent commit any record was verified at: the implicit diff
     /// base when `--diff` isn't given. `None` for an empty ledger.
     pub fn baseline_commit(&self) -> Option<&str> {
         self.claims.values().map(|c| c.commit.as_str()).next()

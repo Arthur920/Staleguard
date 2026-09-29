@@ -12,18 +12,18 @@
   <img src="https://img.shields.io/badge/analyzes-Rust%20%7C%20Python%20%7C%20JS%20%7C%20TS%20%7C%20Java-informational" alt="Languages analyzed">
 </p>
 
-Catch **documentation drift** — places where your READMEs, `CLAUDE.md`, and
-`*.md` docs claim something the code no longer backs up. Staleguard checks docs
+Staleguard catches **documentation drift**: places where your READMEs, `CLAUDE.md`,
+and `*.md` docs claim something the code no longer backs up. It checks docs
 against the actual codebase and reports what's stale, wrong, or missing.
 
-Fully local and offline. The core is **deterministic** — no model, no API — and
-tuned for **zero false positives**: every finding points at a concrete path,
+Everything runs locally and offline. The core is **deterministic** (no model, no API) and
+tuned for **zero false positives**. Every finding points at a concrete path,
 command, symbol, or import edge that the docs got wrong.
 
-**What it catches**, broadly: broken references (paths, commands, env vars,
-flags, code symbols), architecture-rule violations parsed from prose,
-undocumented public surface, stale diagrams, and drift over time with a CI
-alignment score. Full breakdown in [DETAILS.md](DETAILS.md).
+Findings cover broken references (paths, commands, env vars, flags, code
+symbols), architecture-rule violations parsed from prose, undocumented public
+surface, and stale diagrams. A CI alignment score tracks drift over time.
+[DETAILS.md](DETAILS.md) has the full breakdown.
 
 <p align="center">
   <img src="demo.gif" alt="Staleguard demo" width="760">
@@ -31,11 +31,11 @@ alignment score. Full breakdown in [DETAILS.md](DETAILS.md).
 
 ## How it works
 
-The deterministic core (**Layer 1**) is the tool. It checks docs against the real
-codebase — paths, commands, config keys, entry points, and architecture rules
-parsed from prose versus the actual import graph — and reports only what it can
-prove wrong. It needs no models, runs in ~1.2s on a 330k-line repo, and is what
-every install ships with by default.
+The deterministic core (**Layer 1**) is the tool. It checks paths, commands,
+config keys, and entry points against the real codebase, compares architecture
+rules parsed from prose with the actual import graph, and reports only what it
+can prove wrong. It needs no models and runs in ~1.2s on a 330k-line repo. Every
+install ships with it by default.
 
 ```
  Layer 1 — DETERMINISTIC  (no ML, zero false positives)
@@ -45,18 +45,17 @@ every install ships with by default.
 ### Experimental ML layers (opt-in)
 
 Behind the `ml` build feature sit two local-ONNX layers that try to catch
-*behavioral* drift the deterministic core can't see — prose like "the cache
-invalidates on write":
+*behavioral* drift the deterministic core can't see, such as prose like "the cache
+invalidates on write".
 
 ```
  Layer 2 — RETRIEVAL  (local embeddings)        for each claim, fetch relevant code
  Layer 3 — VERIFICATION  (NLI cross-encoder)    (evidence, claim) → supported | contradicted | unverifiable
 ```
 
-These are **experimental and advisory** — treat a `contradicted` verdict as a
-high-precision hint to go look, not a gate. If you just want a dependable check,
-Layer 1 alone is the recommended use. Method and measured numbers for the curious
-are in [DETAILS.md](DETAILS.md#status).
+These layers are **experimental and advisory**. Treat a `contradicted` verdict as a
+high-precision hint to go look, not as a gate. For a dependable check, use
+Layer 1 alone. The method and measured numbers are in [DETAILS.md](DETAILS.md#status).
 
 ## Install
 
@@ -74,22 +73,22 @@ cargo install --git https://github.com/Arthur920/Staleguard
 
 (Windows: a PowerShell installer is attached to each
 [release](https://github.com/Arthur920/Staleguard/releases). Recent Homebrew
-versions prompt to trust third-party taps — run `brew trust arthur920/tap` if
+versions prompt to trust third-party taps; run `brew trust arthur920/tap` if
 asked.)
 
-All of these give you **Layer 1** — the deterministic, zero-false-positive core,
-which needs no models. Then:
+All of these give you **Layer 1**, the deterministic, zero-false-positive core,
+which needs no models. Then run:
 
 ```bash
 staleguard check                 # full repo (Layer 1)
 ```
 
-### Experimental ML layers (Layers 2–3)
+### Experimental ML layers (Layers 2 and 3)
 
-Layers 2–3 are opt-in and advisory (see [the eval](DETAILS.md#status) before you
+Layers 2 and 3 are opt-in and advisory (see [the eval](DETAILS.md#status) before you
 rely on them). They run local ONNX models and need the `ml` feature, which the
-prebuilt binaries omit (the ONNX + embedding deps are large). Two ways to get an
-ml-enabled build — both compile from source, then fetch models at runtime:
+prebuilt binaries omit (the ONNX + embedding deps are large). There are two ways to get an
+ml-enabled build. Both compile from source and then fetch models at runtime:
 
 ```bash
 # Homebrew (compiles with the ml feature; conflicts with the plain `staleguard`)
@@ -106,15 +105,15 @@ staleguard setup                 # fetch + load every model, offline thereafter
 staleguard check --layer 3       # all three layers
 ```
 
-`staleguard setup` prepares all layers and surfaces any model download error up
-front. (The model files are always a runtime download — there's no separate
-"install the models" step.)
+`staleguard setup` prepares all layers and reports any model download error up
+front. The model files are always downloaded at runtime; there is no separate
+"install the models" step.
 
 The Layer 3 judge is the
 [`staleguard`](https://huggingface.co/Arthur920/staleguard)
 model on Hugging Face (a `microsoft/unixcoder-base` fine-tune); it downloads on
-`setup` / first run. Override any model or threshold via `STALEGUARD_*` env vars —
-see [DETAILS.md](DETAILS.md#environment-overrides).
+`setup` / first run. Override any model or threshold with `STALEGUARD_*` env vars
+(see [DETAILS.md](DETAILS.md#environment-overrides)).
 
 ## CI integration
 
@@ -123,10 +122,10 @@ straight into a pipeline. Commit a baseline on your main branch, then gate PRs
 against it:
 
 ```bash
-# once, on the base branch — records the alignment baseline under .staleguard/
+# once, on the base branch: records the alignment baseline under .staleguard/
 staleguard check --write-ledger
 
-# in CI on each PR — fail only if alignment regressed below the baseline
+# in CI on each PR: fail only if alignment regressed below the baseline
 staleguard check --fail-on-regression
 ```
 
@@ -148,17 +147,17 @@ scanning** tab, emit SARIF and upload it:
   id: staleguard
   with:
     format: sarif
-    args: --min-severity warning   # the default — provable drift only (see below)
+    args: --min-severity warning   # the default: provable drift only (see below)
 - uses: github/codeql-action/upload-sarif@v3
   if: always()
   with:
     sarif_file: ${{ steps.staleguard.outputs.sarif-file }}
 ```
 
-**Severity, and what you see by default.** A fresh scan of a large repo surfaces a
+**Severity and default output.** A fresh scan of a large repo reports a
 lot of `undocumented` findings (public surface no doc mentions); those are
 `note`-level and advisory. The default threshold is `--min-severity warning`,
-which drops them and keeps only provable drift — broken references and
+which drops them and keeps only provable drift: broken references and
 contradictions. Severity ranks `note` < `warning` < `error`; raise to
 `--min-severity error` for the strictest gate, or pass `--min-severity note` for
 the full coverage report including the undocumented surface.
@@ -211,7 +210,7 @@ Both suppression and the severity threshold affect the alignment score:
 filtered-out claims (e.g. the `undocumented` notes hidden by the default
 `warning`) drop out of the denominator, while `Supported` claims are always kept.
 So a stricter threshold or more suppression reports a higher score over the
-claims that remain — the score describes what you chose to check, not the whole
+claims that remain. The score describes what you chose to check, not the whole
 repo.
 
 ## Use it in AI-assisted coding (MCP / agents)
@@ -220,19 +219,19 @@ Staleguard is a CLI with `--format json`, so any coding agent can run it and rea
 the findings back. Two ways to wire it in:
 
 **1. As a tool the agent runs directly.** In Claude Code (or any agent with shell
-access), just let it call:
+access), let it call:
 
 ```bash
 staleguard check --format json --diff main
 ```
 
-A good standing instruction in `CLAUDE.md`: *"After editing code or docs, run
+A standing instruction for `CLAUDE.md`: *"After editing code or docs, run
 `staleguard check --format json` and fix any reported drift before finishing."*
 
 **2. As an MCP server.** Expose staleguard over the Model Context Protocol with a
 thin command-runner MCP (e.g. a generic "run this CLI" server), mapping a
 `check_doc_drift` tool to `staleguard check --format json`. The agent then calls the
-tool and receives the structured findings as context — no shell access needed.
+tool and receives the structured findings as context without needing shell access.
 The JSON output (one object per finding: layer, verdict, doc ref, code anchor,
 detail) is the contract to map onto MCP tool results.
 
@@ -250,6 +249,5 @@ cargo run --features ml -- check --layer 3
 
 ---
 
-Heavily AI-assisted personal project — see [DETAILS.md](DETAILS.md#about-this-project).
-Full feature breakdown, performance, and env overrides also in
-[DETAILS.md](DETAILS.md).
+This is a heavily AI-assisted personal project; see [DETAILS.md](DETAILS.md#about-this-project).
+[DETAILS.md](DETAILS.md) also has the full feature breakdown, performance numbers, and env overrides.

@@ -1,4 +1,4 @@
-//! Minimal database-schema extraction — the ground truth ER-diagram coherence
+//! Minimal database-schema extraction: the ground truth ER-diagram coherence
 //! checks against. v1 reads SQL `CREATE TABLE`
 //! statements from `.sql` files: the cleanest, most explicit schema source.
 //!

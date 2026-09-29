@@ -2,8 +2,8 @@
 //!
 //! Mines git change-coupling: a doc and the code it describes that *used to
 //! co-change but no longer do* is a strong staleness signal. If `auth.rs` has
-//! churned repeatedly since `docs/auth.md` was last touched — and the two have a
-//! history of changing together — the doc is likely stale. Pure git history.
+//! churned repeatedly since `docs/auth.md` was last touched (and the two have a
+//! history of changing together), the doc is likely stale. Pure git history.
 //!
 //! Conservative by design (zero-FP stance): a pair must have co-changed at least
 //! [`COCHANGE_MIN`] times *and* the code must have changed at least
@@ -110,7 +110,7 @@ fn analyze(history: &[Vec<String>]) -> Vec<StaleDoc> {
     out
 }
 
-/// Code files that have **never** co-changed with any doc across `history` — the
+/// Code files that have **never** co-changed with any doc across `history`: the
 /// "no doc has ever tracked this code" signal for net-new coverage gaps
 /// (`coverage-gaps.md` §4). Conservative: any commit touching both a doc and a
 /// code file marks *all* its code files tracked, so we under-flag rather than

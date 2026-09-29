@@ -4,7 +4,7 @@
 //! a `microsoft/unixcoder-base` fine-tune over `(code premise, prose claim)` pairs
 //! that predicts `{entailment, neutral, contradiction}`. UniXcoder's code-aware
 //! pretraining keeps real code *in*-distribution as the premise, which is exactly
-//! the failure mode a text-NLI model (MNLI/SNLI on prose) hit — overconfident
+//! the failure mode a text-NLI model (MNLI/SNLI on prose) hit: overconfident
 //! false contradictions on genuine claims. The model is overridable via
 //! `STALEGUARD_NLI_REPO`, with `STALEGUARD_NLI_ONNX` / `STALEGUARD_NLI_THRESHOLD` /
 //! `STALEGUARD_NLI_MARGIN` for the artifact and decision knobs.
@@ -17,7 +17,7 @@
 //! which map onto [`Verdict::Supported`] / [`Verdict::Contradicted`] /
 //! [`Verdict::Unverifiable`].
 //!
-//! It is a *classifier*, not a generative LLM — no API, no per-token cost, code
+//! It is a *classifier*, not a generative LLM: no API, no per-token cost, code
 //! never leaves the machine. The model is an int8-quantized ONNX
 //! (`model_quantized.onnx`, ~121 MB) loaded via `ort`, mirroring the offline
 //! model-download path Layer 2 already uses.
@@ -60,12 +60,12 @@ const MAX_TOKENS: usize = 256;
 
 /// Top-k code chunks retrieved per claim and fed to the judge as evidence.
 pub const EVIDENCE_K: usize = 5;
-/// Default upper bound on prose claims judged per run — one forward pass per
+/// Default upper bound on prose claims judged per run; one forward pass per
 /// (claim, evidence) pair, so this bounds model cost. See [`max_claims`].
 pub const DEFAULT_MAX_CLAIMS: usize = 300;
 
 /// Upper bound on prose claims judged per run, from `STALEGUARD_NLI_MAX_CLAIMS`
-/// (default [`DEFAULT_MAX_CLAIMS`]). `0` means no cap — judge every candidate
+/// (default [`DEFAULT_MAX_CLAIMS`]). `0` means no cap; judge every candidate
 /// claim, trading runtime for coverage. The judge cost is ~linear in this, so
 /// it's the main knob for the Layer-3 time/coverage trade-off.
 pub fn max_claims() -> usize {
@@ -270,7 +270,7 @@ impl Judge {
 /// The verdict rule (pure, model-free, unit-tested), over per-chunk
 /// `[contra, entail, neutral]` probabilities.
 ///
-/// Entailment is pooled as a plain max — any chunk that clearly entails supports
+/// Entailment is pooled as a plain max; any chunk that clearly entails supports
 /// the claim. Contradiction is the differentiating signal but also the OOD
 /// failure mode (a text-NLI model fed code dumps near-equal mass onto contra and
 /// entail), so a chunk only *counts* as contradicting when contradiction is the
@@ -311,7 +311,7 @@ pub fn check(
     }
 
     // Evidence selection. Default: Layer-1 grounding + a model-free lexical
-    // fallback ([`crate::evidence`]) — no corpus embedding. `STALEGUARD_EMBED_RETRIEVE`
+    // fallback ([`crate::evidence`]); no corpus embedding. `STALEGUARD_EMBED_RETRIEVE`
     // restores the embedding retriever. Each entry is (text, path, start_line).
     let t = std::time::Instant::now();
     let per_claim: Vec<Vec<(String, String, usize)>> =
@@ -361,7 +361,7 @@ pub fn check(
             .iter()
             .map(|(_, path, line)| format!("{path}:{line}"))
             .collect();
-        // Prefer the claim's own grounding (symbols/modules — survives moves and
+        // Prefer the claim's own grounding (symbols/modules, which survives moves and
         // feeds the fingerprint flag); fall back to the evidence files only when
         // the claim grounded to nothing.
         let prov = if claim.provenance.is_empty() {
@@ -614,8 +614,8 @@ The `check` command resolves `Manifests` from the nearest ancestor directory.
     // Drives `decide` over a checked-in labeled corpus of NLI score
     // distributions and reports a confusion matrix. This measures the verdict
     // POLICY (the rule that turns model scores into reported drift) without the
-    // 121 MB model, so it runs in normal CI. A *false contradiction* — a verdict
-    // of Contradicted where gold is not — is a wrongly-reported drift finding,
+    // 121 MB model, so it runs in normal CI. A *false contradiction* (a verdict
+    // of Contradicted where gold is not) is a wrongly-reported drift finding,
     // the Layer-3 analog of the Layer-1 zero-false-positive contract, and is a
     // hard failure here. Overall accuracy is ratcheted. Tuning threshold/margin
     // moves these numbers, so this is the substrate for that trade-off.
@@ -672,7 +672,7 @@ The `check` command resolves `Manifests` from the nearest ancestor directory.
 
         assert!(
             false_contras.is_empty(),
-            "false contradiction(s) — wrongly-reported drift:\n{}",
+            "false contradiction(s), wrongly-reported drift:\n{}",
             false_contras.join("\n")
         );
         assert!(
@@ -687,7 +687,7 @@ The `check` command resolves `Manifests` from the nearest ancestor directory.
     // labeled (claim, evidence) corpus and reports its actual contradiction
     // precision/recall. It is a deliberately ADVERSARIAL recall probe: hard
     // minimal-pair negations and constant swaps (high lexical overlap, opposite
-    // meaning) — the slice cross-encoders are worst at. It is NOT an overall
+    // meaning), the slice cross-encoders are worst at. It is NOT an overall
     // accuracy benchmark and does not supersede the disjoint-holdout precision
     // measured at training time; it is the in-tree recall tripwire and the
     // regression baseline for model work.
@@ -702,7 +702,7 @@ The `check` command resolves `Manifests` from the nearest ancestor directory.
     // measures roughly: contradiction recall ~0.14, false contradictions = 1.
     // Low recall here reflects the hard minimal-pair slice (the model reads
     // negations with high lexical overlap as supported), NOT the holdout-measured
-    // precision — see the module-level note and DETAILS.md. Raise these floors as
+    // precision; see the module-level note and DETAILS.md. Raise these floors as
     // the model gets better at subtle drift.
 
     #[derive(serde::Deserialize)]
@@ -772,12 +772,12 @@ The `check` command resolves `Manifests` from the nearest ancestor directory.
         // list names which. Drive this to 0 on the next retrain.
         assert!(
             fp <= 1,
-            "false contradictions {fp} > 1 baseline — wrongly-reported drift regressed:\n{}",
+            "false contradictions {fp} > 1 baseline; wrongly-reported drift regressed:\n{}",
             false_contras.join("\n")
         );
         assert!(
             recall >= 0.10,
-            "contradiction recall {recall:.3} below 0.10 baseline — model went blinder to drift (tp={tp} fn={fn_})"
+            "contradiction recall {recall:.3} below 0.10 baseline; model went blinder to drift (tp={tp} fn={fn_})"
         );
         assert!(
             accuracy >= 0.50,
@@ -789,13 +789,13 @@ The `check` command resolves `Manifests` from the nearest ancestor directory.
     //
     // The companion to the adversarial probe above. Drives the loaded model over
     // a deterministic, class-balanced slice of the CodingNLI repo-disjoint holdout
-    // split — the same generalization-to-unseen-repos data the project's headline
+    // split, the same generalization-to-unseen-repos data the project's headline
     // contradiction-precision number was measured on. This is the faithful "what
     // can the model do" benchmark; the minimal-pair probe is the "where is it
     // blind" tripwire. Together they bound the model's real ability.
     //
     // The sample is NOT vendored: its rows are code snippets harvested from many
-    // third-party OSS repos under mixed licenses, and this repo is public —
+    // third-party OSS repos under mixed licenses, and this repo is public,
     // redistributing them here would be an attribution/licensing problem. Instead
     // generate it locally from the (private) training data and point the harness
     // at it; absent that, the benchmark skips:
@@ -807,7 +807,7 @@ The `check` command resolves `Manifests` from the nearest ancestor directory.
     // Each row is a single `(premise = code, hypothesis = claim, label)`. The
     // headline metric is contradiction PRECISION (false contradictions are the
     // cardinal sin); recall and per-class accuracy are also reported. Floors are a
-    // measured baseline — run once to set them, then ratchet up on retrain.
+    // measured baseline; run once to set them, then ratchet up on retrain.
 
     #[derive(serde::Deserialize)]
     struct HoldoutCase {
@@ -831,7 +831,7 @@ The `check` command resolves `Manifests` from the nearest ancestor directory.
         let Some(path) = std::env::var_os("STALEGUARD_NLI_HOLDOUT") else {
             eprintln!(
                 "skipping holdout benchmark: set STALEGUARD_NLI_HOLDOUT to a sample \
-                 generated by tools/gen_holdout_sample.py (not vendored — third-party OSS)"
+                 generated by tools/gen_holdout_sample.py (not vendored; third-party OSS)"
             );
             return;
         };
@@ -878,7 +878,7 @@ The `check` command resolves `Manifests` from the nearest ancestor directory.
         );
 
         // Headline gate: contradiction precision on unseen repos. Baseline set from
-        // the first measured run — ratchet up as the model improves.
+        // the first measured run; ratchet up as the model improves.
         // Baselines sit just under the first measured run (this sample and the
         // model are deterministic): precision 0.894, recall 0.917, accuracy 0.825.
         assert!(

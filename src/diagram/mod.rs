@@ -1,7 +1,7 @@
 //! Layer 1 diagram coherence: parse text-based architecture diagrams and
 //! set-diff their nodes/edges against the real module dependency graph.
 //!
-//! Scope (first cut): graph-shaped diagrams only — Mermaid `graph`/`flowchart`,
+//! Scope (first cut) is graph-shaped diagrams only: Mermaid `graph`/`flowchart`,
 //! PlantUML component diagrams, and Graphviz DOT. Sequence/class/ER/state
 //! diagrams are recognized and skipped (they need symbol/call-graph alignment).
 //! No ML: every endpoint is grounded against
@@ -83,7 +83,7 @@ pub struct Diagram {
 }
 
 impl Diagram {
-    /// Display text for a node id — its declared label, else the id itself.
+    /// Display text for a node id: its declared label, else the id itself.
     fn text(&self, id: &str) -> String {
         self.nodes
             .iter()
@@ -255,7 +255,7 @@ fn diff(d: &Diagram, index: &CodeIndex, modules: &HashSet<String>) -> Vec<Findin
         .map(|n| (n.label.as_str(), res(&n.label)))
         .collect();
 
-    // 1. Phantom edges — drawn, both endpoints name exactly one real module, but
+    // 1. Phantom edges: drawn, both endpoints name exactly one real module, but
     //    no real import connects them. Exact-unique only: a fuzzily- or ambiguously-
     //    grounded endpoint can't carry an assertion about a specific edge without
     //    risking false positives (the wild audit's conceptual/segment-match arrows).
@@ -291,7 +291,7 @@ fn diff(d: &Diagram, index: &CodeIndex, modules: &HashSet<String>) -> Vec<Findin
         }
     }
 
-    // 2. Stale boxes — a box that clearly names a code module that is gone. Fuzzy
+    // 2. Stale boxes: a box that clearly names a code module that is gone. Fuzzy
     //    resolution only *reduces* this set (more boxes ground), so it stays safe.
     for (text, resolution) in &node_res {
         if resolution.grounds() {
@@ -311,7 +311,7 @@ fn diff(d: &Diagram, index: &CodeIndex, modules: &HashSet<String>) -> Vec<Findin
         }
     }
 
-    // 3. Missing arrows — a real import between two boxes that are *both* already
+    // 3. Missing arrows: a real import between two boxes that are *both* already
     //    drawn, yet no edge connects them. Bounded to depicted modules, so it
     //    never fires for components the author chose to omit.
     //    Exact-unique only: fuzzy/ambiguous boxes must not invent "you forgot an
@@ -361,7 +361,7 @@ fn diff(d: &Diagram, index: &CodeIndex, modules: &HashSet<String>) -> Vec<Findin
 
 /// True if a box label unambiguously denotes a code module *path* (so an
 /// ungrounded one is a stale reference, not a conceptual box). Deliberately
-/// conservative — only a clean path/namespace token with a separator counts.
+/// conservative: only a clean path/namespace token with a separator counts.
 /// A bare word (`User`, `DB`), a URL route (`/items/public/`), a decision-node
 /// label (`needed=False<br/>ok`), or call syntax is left alone to keep Layer 1
 /// zero-FP. Pass the [`ground_label`]-normalized text so a trailing `.ts`/`.py`
@@ -374,7 +374,7 @@ fn module_intent(text: &str) -> bool {
     if text.starts_with('/') || text.contains("://") {
         return false;
     }
-    // Markup, decision-node labels, call/query syntax — none belong in a path.
+    // Markup, decision-node labels, call/query syntax; none belong in a path.
     if text.contains([
         '=', '<', '>', '{', '}', '(', ')', '\\', '?', '#', '&', '"', '\'',
     ]) {

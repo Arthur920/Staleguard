@@ -1,6 +1,6 @@
 //! Layer 1: env vars and CLI flags named in docs that the code never reads.
 //!
-//! Grounding is loose presence in source — the same fewest-false-positives
+//! Grounding is loose presence in source: the same fewest-false-positives
 //! rule coverage-gaps uses. An env var is "real" if its name appears as a token
 //! anywhere in the source tree (`env::var("NAME")`, `process.env.NAME`, etc.
 //! all carry the literal); a `--flag` is "real" if its snake/concat form
@@ -24,7 +24,7 @@ use crate::code::lang;
 use crate::commands::command_lines;
 use crate::findings::{Finding, Verdict};
 
-/// Every identifier-like token across all source files — the grounding set for
+/// Every identifier-like token across all source files: the grounding set for
 /// env vars and flags. TOML/YAML are in `CODE_EXTS`, so `Cargo.toml` keys (e.g.
 /// `features`, `release`) ground the corresponding cargo flags.
 pub fn code_tokens(repo_root: &Path) -> HashSet<String> {
@@ -138,10 +138,10 @@ fn check_flags(
 /// on `-` by the tokenizer); instead it surfaces as a field or type whose name
 /// drops the dashes in one of a few casings (all for `--type-not`):
 ///
-/// - snake_case `type_not` — clap-derive fields, Python/Rust fields
-/// - concat `typenot` — joined-lowercase
-/// - PascalCase `TypeNot` — per-flag structs (ripgrep) / enum variants
-/// - camelCase `typeNot` — JS/TS option fields
+/// - snake_case `type_not`: clap-derive fields, Python/Rust fields
+/// - concat `typenot`: joined-lowercase
+/// - PascalCase `TypeNot`: per-flag structs (ripgrep) / enum variants
+/// - camelCase `typeNot`: JS/TS option fields
 ///
 /// All four are exact `HashSet` lookups, so grounding stays case-exact and adds
 /// no corpus-wide lowercasing (which would risk masking real drift).
@@ -149,7 +149,7 @@ fn flag_grounded(flag: &str, code_tokens: &HashSet<String>) -> bool {
     // Negation flags (`--no-color`, `--no-encoding`) are commonly auto-generated
     // from the positive flag (clap's `no_` negations, ripgrep's `name_negated`),
     // so they carry no identifier of their own. Ground `--no-foo` whenever `foo`
-    // grounds — far cheaper to miss a never-supported negation than to cry drift
+    // grounds; far cheaper to miss a never-supported negation than to cry drift
     // on a real one.
     if let Some(base) = flag.strip_prefix("no-") {
         if flag_grounded(base, code_tokens) {
@@ -190,8 +190,8 @@ fn capitalize_join(segments: &[&str], lower_first: bool) -> String {
 /// plus inline `backtick` spans whose whole content is an `UPPER_SNAKE` env
 /// identifier (requiring an underscore avoids matching prose acronyms like
 /// `API`). Env vars are UPPER_SNAKE by convention; the casing filter on the
-/// dollar form skips shell variables that follow other conventions — zsh
-/// `$fpath` (lowercase), PowerShell `$OutputEncoding` (PascalCase) — which
+/// dollar form skips shell variables that follow other conventions: zsh
+/// `$fpath` (lowercase), PowerShell `$OutputEncoding` (PascalCase), which
 /// appear in example snippets but are not the project's own env vars.
 fn env_var_claims(markdown: &str) -> Vec<(usize, String)> {
     let mut out = Vec::new();
@@ -358,7 +358,7 @@ mod tests {
     #[test]
     fn locally_assigned_shell_var_is_not_flagged() {
         let code = HashSet::new();
-        // `MDBOOK_VERS` is assigned in the snippet then used — a local shell var.
+        // `MDBOOK_VERS` is assigned in the snippet then used; a local shell var.
         let md = "```bash\nMDBOOK_VERS=\"1.0\"\ngh release create v$MDBOOK_VERS\n```";
         let flagged: Vec<String> = check(md, "README.md", &code, &HashSet::new())
             .iter()

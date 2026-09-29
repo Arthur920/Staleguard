@@ -1,7 +1,7 @@
 //! Output rendering for every `staleguard` subcommand.
 //!
-//! One place that knows how to turn each command's result — findings, a drift
-//! [`Outcome`](crate::drift::Outcome), the rule audit, the code index — into
+//! One place that knows how to turn each command's result (findings, a drift
+//! [`Outcome`](crate::drift::Outcome), the rule audit, the code index) into
 //! either human `text` or machine `json`, so the command dispatch in `main.rs`
 //! stays argument-parsing plus a render call.
 
@@ -18,7 +18,7 @@ use clap::ValueEnum;
 pub enum Format {
     Text,
     Json,
-    /// SARIF 2.1.0 — supported by `check`; other commands fall back to `json`
+    /// SARIF 2.1.0: supported by `check`; other commands fall back to `json`
     /// with a note on stderr.
     Sarif,
 }
@@ -176,7 +176,7 @@ pub(crate) fn report_rules(rows: &[rules::AuditRow], format: Format) {
             );
             if ungrounded > 0 {
                 println!(
-                    "note: skipped rules are not enforced — fix the operand name so it \
+                    "note: skipped rules are not enforced; fix the operand name so it \
                      matches a real module, or the rule is silently ignored."
                 );
             }

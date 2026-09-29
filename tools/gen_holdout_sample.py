@@ -8,7 +8,7 @@ per-(label) sample, spread evenly across the sorted ids of every language, so th
 benchmark is reproducible and balanced.
 
 IMPORTANT: the output is NOT checked in. Its rows are code snippets from many
-third-party OSS repos under mixed licenses, and Staleguard is a public repo —
+third-party OSS repos under mixed licenses, and Staleguard is a public repo,
 redistributing them would be an attribution/licensing problem. Write it to a
 local path and point the harness at it via STALEGUARD_NLI_HOLDOUT:
 
@@ -53,7 +53,7 @@ def main():
     rows.sort(key=lambda o: (o["label"], o.get("lang", ""), o["premise"]))
     with open(args.out, "w") as f:
         f.write("// Layer-3 ABILITY benchmark: a deterministic, class-balanced slice of the\n")
-        f.write("// CodingNLI repo-disjoint holdout split (data/test) — the same generalization\n")
+        f.write("// CodingNLI repo-disjoint holdout split (data/test), the same generalization\n")
         f.write("// set the held-out contradiction-precision headline was measured on. Generated\n")
         f.write("// by tools/gen_holdout_sample.py; do not hand-edit. label: entailment ->\n")
         f.write("// supported, contradiction -> contradicted, neutral -> unverifiable.\n")

@@ -3,7 +3,7 @@
 
 Ground truth is the repo's own real module import graph (`staleguard index`).
 We build a correct-by-construction Mermaid flowchart over an induced subgraph
-(drawing EVERY real edge among the chosen nodes, so it is genuinely drift-free),
+(drawing EVERY real edge among the chosen nodes, so it is drift-free),
 then inject single, known defects and check that `staleguard check` reports
 exactly the expected finding. Three classes:
 
@@ -128,7 +128,7 @@ def main():
     # ----- fuzzy grounding: conceptual labels never drive edge findings --------
     # Real diagrams label boxes conceptually ("Align", not "src/diagram/align").
     # Fuzzy grounding only *suppresses* stale-box findings; it must NEVER drive a
-    # phantom or missing-arrow (conceptual/behavioral arrows aren't import claims —
+    # phantom or missing-arrow (conceptual/behavioral arrows aren't import claims;
     # the novu wild-audit false positives). So a Title-cased conceptual phantom
     # pair must stay silent, and an ambiguous segment label must stay silent.
     print("\n--- fuzzy grounding (conceptual labels stay silent for edges) ---")
@@ -143,7 +143,7 @@ def main():
     concept = {n: n.rsplit("/", 1)[-1].replace("_", " ").title() for n in fuzzy_nodes}
 
     # A drawn edge between two conceptually-labelled boxes (no real import) must
-    # NOT produce a phantom — conceptual labels are fuzzy and fuzzy can't drive edges.
+    # NOT produce a phantom; conceptual labels are fuzzy and fuzzy can't drive edges.
     fuzzy_phantom = next(((a, b) for a in fuzzy_nodes for b in fuzzy_nodes
                           if a != b and (a, b) not in edges and (b, a) not in edges), None)
     if fuzzy_phantom and concept[fuzzy_phantom[0]] != concept[fuzzy_phantom[1]]:

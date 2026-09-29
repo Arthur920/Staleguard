@@ -169,8 +169,8 @@ fn is_dirty(prov: &Provenance, changed: &HashSet<String>) -> bool {
 }
 
 /// Combined fingerprint of the symbols a claim is anchored to. `0` when the
-/// claim resolves to no symbol (module/path-anchored claims carry no fingerprint
-/// — lineage and scoring still apply, but the drift flag never fires).
+/// claim resolves to no symbol (module/path-anchored claims carry no fingerprint;
+/// lineage and scoring still apply, but the drift flag never fires).
 fn claim_facts_hash(prov: &Provenance, index: &CodeIndex) -> u64 {
     let mut hashes: Vec<u64> = resolved_symbols(prov, index)
         .map(|s| facts::facts_hash(&s.facts))
@@ -209,7 +209,7 @@ fn claim_facts(prov: &Provenance, index: &CodeIndex) -> Facts {
     merged
 }
 
-/// Symbols an anchor points at — matched by qualified name or bare name.
+/// Symbols an anchor points at, matched by qualified name or bare name.
 fn resolved_symbols<'a>(
     prov: &'a Provenance,
     index: &'a CodeIndex,
@@ -221,7 +221,7 @@ fn resolved_symbols<'a>(
 }
 
 /// Modules a claim is scored under: its module anchors, the modules of any
-/// symbol anchors, and — for path anchors — the module that owns the file
+/// symbol anchors, and (for path anchors) the module that owns the file
 /// (resolved via the index), falling back to the path itself so a doc-referenced
 /// file still buckets to *something* meaningful rather than `(unscoped)`.
 fn claim_modules(prov: &Provenance, index: &CodeIndex) -> Vec<String> {

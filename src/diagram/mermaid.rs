@@ -1,5 +1,5 @@
 //! Mermaid `graph`/`flowchart` parser. Other mermaid kinds (sequence, class,
-//! ER, state) are recognized and skipped — they need symbol/call-graph
+//! ER, state) are recognized and skipped; they need symbol/call-graph
 //! alignment, not a module edge-diff.
 
 use std::sync::OnceLock;
@@ -82,7 +82,7 @@ pub(super) fn parse(body: &str, origin: &str) -> Option<Diagram> {
     })
 }
 
-/// Everything on the header line after the `graph TD` / `flowchart LR` prefix —
+/// Everything on the header line after the `graph TD` / `flowchart LR` prefix;
 /// mermaid allows the first edge to share the header line.
 fn header_tail(header: &str) -> String {
     let header = header.trim();

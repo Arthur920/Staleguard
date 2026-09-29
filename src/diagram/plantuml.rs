@@ -1,5 +1,5 @@
 //! PlantUML component-diagram parser. Sequence diagrams (`participant`, `A -> B
-//! : msg`) are recognized and skipped — message-order alignment is Layer 2/3.
+//! : msg`) are recognized and skipped; message-order alignment is Layer 2/3.
 
 use std::sync::OnceLock;
 

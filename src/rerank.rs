@@ -91,7 +91,7 @@ impl Reranker {
 
         let outputs = self.session.run(inputs)?;
         let (_, logits) = outputs[0].try_extract_tensor::<f32>()?;
-        // Single-logit relevance head; some rerankers emit [neg, pos] — take the
+        // Single-logit relevance head; some rerankers emit [neg, pos]; take the
         // last as the positive/relevance score.
         Ok(*logits.last().unwrap_or(&f32::MIN))
     }

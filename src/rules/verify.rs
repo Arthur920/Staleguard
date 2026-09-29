@@ -22,7 +22,7 @@ use super::{grounded, matches, quote_list, Rule, SourcedRule};
 /// violations.
 pub fn check(rules: &[SourcedRule], index: &CodeIndex, repo_root: &Path) -> Vec<Finding> {
     let modules = index.module_set();
-    // Read every source file once, up front — but only if some forbid-symbol
+    // Read every source file once, up front, but only if some forbid-symbol
     // rule actually needs the textual scan. Otherwise N such rules would each
     // re-walk and re-read the whole repo.
     let sources = if rules
@@ -52,8 +52,8 @@ pub fn check(rules: &[SourcedRule], index: &CodeIndex, repo_root: &Path) -> Vec<
             Rule::ForbidSymbol { symbol, except } => {
                 // The symbol check returns the modules it actually scanned; a
                 // clean rule is anchored to them so adding the symbol in any of
-                // them re-opens the claim (precise lineage, fixing the old empty
-                // provenance that could never carry forward).
+                // them re-opens the claim. Empty provenance could never carry
+                // forward, so this gives the rule precise lineage.
                 let scanned =
                     check_forbid_symbol(sr, symbol, except, index, &sources, &mut findings);
                 if findings.len() == before && !scanned.is_empty() {
@@ -133,7 +133,7 @@ pub(super) fn check_forbid_edge(
     out: &mut Vec<Finding>,
 ) {
     if !grounded(from, modules) || !grounded(to, modules) {
-        return; // operand names no real module — unverifiable, don't guess.
+        return; // operand names no real module; unverifiable, don't guess.
     }
     for e in &index.module_edges {
         if matches(&e.from_module, from) && matches(&e.to_module, to) {
@@ -161,7 +161,7 @@ pub(super) fn check_forbid_reach(
     out: &mut Vec<Finding>,
 ) {
     if !grounded(from, modules) || !grounded(to, modules) {
-        return; // operand names no real module — unverifiable, don't guess.
+        return; // operand names no real module; unverifiable, don't guess.
     }
     // Adjacency over concrete module paths.
     let mut adj: HashMap<&str, Vec<&str>> = HashMap::new();
@@ -279,7 +279,7 @@ pub(super) fn check_layer(
 /// Read every in-budget source file once: its module path and full text. Shared
 /// across all forbid-symbol rules so the repo is walked + read a single time per
 /// `check` run rather than once per rule. Files that fail to read (non-UTF-8,
-/// permissions) are dropped — they can't be textually scanned anyway.
+/// permissions) are dropped; they can't be textually scanned anyway.
 pub(super) fn read_sources(repo_root: &Path) -> Vec<(String, String)> {
     lang::code_files(repo_root)
         .par_iter()
@@ -293,7 +293,7 @@ pub(super) fn read_sources(repo_root: &Path) -> Vec<(String, String)> {
 
 /// Check a forbid-symbol rule. Returns the (deduped) modules it scanned so a
 /// clean rule can be anchored to them. Two passes: a textual scan of source
-/// lines, and — when the symbol resolves to exactly one indexed definition — a
+/// lines, and (when the symbol resolves to exactly one indexed definition) a
 /// lookup of the resolved reference graph (`ref_callers[target]`) for
 /// indirect/re-exported references the text scan can't see. The ref pass is skipped on ambiguous (multi-target) symbols
 /// to keep zero false positives, and skips modules the text pass already flagged.
@@ -366,7 +366,7 @@ pub(super) fn check_forbid_symbol(
     scanned
 }
 
-/// Whether a forbid-symbol operand names this indexed symbol — by full
+/// Whether a forbid-symbol operand names this indexed symbol: by full
 /// `qualified_name`, by a `::`-qualified suffix, or by leaf name.
 fn symbol_identifies(operand: &str, s: &crate::code::symbol::Symbol) -> bool {
     let leaf = operand.rsplit([':', '.']).next().unwrap_or(operand);

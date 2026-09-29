@@ -3,10 +3,10 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Staleguard — guard your docs against drift</title>
-<meta name="description" content="Staleguard catches documentation drift — where your CLAUDE.md, READMEs, and docs claim something the code no longer backs up. Fully local, offline, tuned for zero false positives.">
+<title>Staleguard: guard your docs against drift</title>
+<meta name="description" content="Staleguard catches documentation drift: places where your CLAUDE.md, READMEs, and docs claim something the code no longer backs up. It runs locally and offline and is tuned for zero false positives.">
 <meta property="og:title" content="Staleguard">
-<meta property="og:description" content="Catch documentation drift, fully local and offline. A deterministic core tuned for zero false positives — plus an experimental, opt-in local ML layer.">
+<meta property="og:description" content="Catch documentation drift, fully local and offline. A deterministic core tuned for zero false positives, plus an experimental, opt-in local ML layer.">
 <meta property="og:image" content="staleguard.png">
 <link rel="icon" type="image/png" href="favicon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -49,7 +49,7 @@
     position: relative;
   }
 
-  /* forged background — gradient mesh + grain + faint hatch */
+  /* forged background: gradient mesh + grain + faint hatch */
   body::before {
     content: "";
     position: fixed;
@@ -337,7 +337,7 @@
     .layer-num { font-size: 2.4rem; }
     .layer-meta { display: none; }
   }
-  /* how layer 1 works — compact step flow */
+  /* how layer 1 works: compact step flow */
   .l1-flow {
     margin-top: 30px;
     display: grid; grid-template-columns: repeat(4, 1fr) ; gap: 0;
@@ -362,7 +362,7 @@
     .l1-flow { grid-template-columns: 1fr; }
     .l1-step + .l1-step { border-left: none; border-top: 1px solid var(--edge); }
   }
-  /* experimental layers — visually subordinate to Layer 1 */
+  /* experimental layers: visually subordinate to Layer 1 */
   .exp-head {
     font-family: "JetBrains Mono", monospace; font-size: 0.7rem;
     letter-spacing: 0.18em; text-transform: uppercase; color: var(--ash);
@@ -574,14 +574,14 @@
 <section id="layers" class="wrap">
   <p class="eyebrow reveal">The architecture</p>
   <h2 class="section-title reveal">A deterministic core, plus an experimental ML layer</h2>
-  <p class="section-lead reveal">Layer&nbsp;1 is the tool: deterministic, instant, shipped in every build, tuned for zero false positives. Layers&nbsp;2–3 are an opt-in ML extension that reaches for behavioral drift the core can't — useful, but advisory. Everything runs locally; code never leaves the machine.</p>
+  <p class="section-lead reveal">Layer&nbsp;1 is the tool. It is deterministic, instant, shipped in every build, and tuned for zero false positives. Layers&nbsp;2 and 3 are an opt-in ML extension that tries to catch behavioral drift the core can't; they are useful but advisory. Everything runs locally, and code never leaves the machine.</p>
 
   <div class="layers-grid stagger">
     <div class="layer l1">
       <div class="layer-num">I</div>
       <div class="layer-body">
         <h3>Deterministic <span style="font-family:'JetBrains Mono',monospace;font-size:.6em;letter-spacing:.12em;color:var(--good);vertical-align:middle">· DEFAULT</span></h3>
-        <p>Paths exist? Commands real? Config keys present? Architecture rules parsed from prose, checked against the real import graph. No ML — tuned for zero false positives. This is the part you can trust unconditionally.</p>
+        <p>Paths exist? Commands real? Config keys present? Architecture rules parsed from prose, checked against the real import graph. It uses no ML and is tuned for zero false positives. This is the part you can trust without conditions.</p>
       </div>
       <div class="layer-meta">instant · no model<span class="accent">~1.2s on 330k LOC</span></div>
     </div>
@@ -591,7 +591,7 @@
     <div class="l1-step">
       <div class="k"><b>01</b>Read docs</div>
       <h4>Extract claims</h4>
-      <p>Scan every <code>*.md</code> for concrete assertions — paths, commands, env vars, flags, code symbols, and architecture rules written in prose.</p>
+      <p>Scan every <code>*.md</code> for concrete assertions: paths, commands, env vars, flags, code symbols, and architecture rules written in prose.</p>
     </div>
     <div class="l1-step">
       <div class="k"><b>02</b>Read code</div>
@@ -601,7 +601,7 @@
     <div class="l1-step">
       <div class="k"><b>03</b>Compare</div>
       <h4>Resolve each claim</h4>
-      <p>Check every claim against the index; run prose architecture rules against the import graph. No guessing — it either resolves or it doesn't.</p>
+      <p>Check every claim against the index; run prose architecture rules against the import graph. Each claim either resolves or it doesn't.</p>
     </div>
     <div class="l1-step">
       <div class="k"><b>04</b>Report</div>
@@ -616,18 +616,18 @@
       <div class="layer-num">II</div>
       <div class="layer-body">
         <h3>Retrieval</h3>
-        <p>For each surviving claim, local embeddings fetch the most-relevant code chunks — symbol-aligned via tree-sitter, with an optional reranker.</p>
+        <p>For each surviving claim, local embeddings fetch the most relevant code chunks, split on tree-sitter symbol boundaries, with an optional reranker.</p>
       </div>
     </div>
     <div class="layer l3 exp">
       <div class="layer-num">III</div>
       <div class="layer-body">
         <h3>Verification</h3>
-        <p>A code-aware NLI cross-encoder judges <code style="font-family:'JetBrains Mono',monospace;font-size:.85em;color:var(--blade)">(evidence, claim)</code> → supported · contradicted · unverifiable. A high-precision hint to go look — advisory, not a gate.</p>
+        <p>A code-aware NLI cross-encoder judges <code style="font-family:'JetBrains Mono',monospace;font-size:.85em;color:var(--blade)">(evidence, claim)</code> → supported · contradicted · unverifiable. Treat it as a high-precision hint to go look, not as a gate.</p>
       </div>
     </div>
   </div>
-  <p class="ledger-note reveal">Underneath sits a <b>drift ledger</b> — makes runs incremental, scores alignment, and gates CI on regressions.</p>
+  <p class="ledger-note reveal">Underneath sits a <b>drift ledger</b> that makes runs incremental, scores alignment, and gates CI on regressions.</p>
 </section>
 
 <div class="divider"></div>
@@ -652,9 +652,9 @@
       <span class="glyph">// ARCHITECTURE</span>
       <h3>Architecture violations</h3>
       <ul>
-        <li>forbidden imports — "controllers must not import db"</li>
-        <li>layering — "domain depends on nothing"</li>
-        <li>independence — "core is independent of infra"</li>
+        <li>forbidden imports: "controllers must not import db"</li>
+        <li>layering: "domain depends on nothing"</li>
+        <li>independence: "core is independent of infra"</li>
         <li>forbidden symbols outside their allowed module</li>
       </ul>
     </div>
@@ -664,7 +664,7 @@
       <ul>
         <li>a local NLI cross-encoder judges prose the rules can't</li>
         <li>verdicts: supported / contradicted / unverifiable</li>
-        <li>claims ground to symbols — a verdict re-opens when that code changes</li>
+        <li>claims ground to symbols, so a verdict re-opens when that code changes</li>
         <li>opt-in <code>ml</code> build · advisory, not a gate</li>
       </ul>
     </div>
@@ -700,17 +700,17 @@
 <section id="install" class="wrap">
   <p class="eyebrow reveal">Get started</p>
   <h2 class="section-title reveal">Install, run, gate CI, wire into agents</h2>
-  <p class="section-lead reveal">The default build gives you Layer&nbsp;1 — the deterministic, zero-false-positive core that needs no models, and the recommended way to use Staleguard. Add the <code style="font-family:'JetBrains Mono',monospace;font-size:.85em;color:var(--blade)">ml</code> feature for the experimental Layers&nbsp;2–3.</p>
+  <p class="section-lead reveal">The default build gives you Layer&nbsp;1, the deterministic, zero-false-positive core. It needs no models and is the recommended way to use Staleguard. Add the <code style="font-family:'JetBrains Mono',monospace;font-size:.85em;color:var(--blade)">ml</code> feature for the experimental Layers&nbsp;2 and 3.</p>
 
   <div class="tabs reveal">
     <button class="tab active" data-tab="t-install">Install</button>
-    <button class="tab" data-tab="t-ml">Layers 2–3 (experimental ML)</button>
+    <button class="tab" data-tab="t-ml">Layers 2 and 3 (experimental ML)</button>
     <button class="tab" data-tab="t-ci">CI gate</button>
     <button class="tab" data-tab="t-agent">Agents / MCP</button>
   </div>
 
   <div class="panel active" id="t-install">
-    <p class="lead">Homebrew, an install script, or from source — all give you the deterministic core. Then run <code>check</code> on the full repo.</p>
+    <p class="lead">Homebrew, an install script, or from source. Each one gives you the deterministic core. Then run <code>check</code> on the full repo.</p>
     <div class="code-block">
       <div class="bar"><div class="lights"><i></i><i></i><i></i></div><span class="title">shell</span><button class="copy-btn" data-copy="brew install Arthur920/tap/staleguard
 staleguard check">COPY</button></div>
@@ -725,12 +725,12 @@ staleguard check">COPY</button></div>
   </div>
 
   <div class="panel" id="t-ml">
-    <p class="lead">Experimental and advisory. Layers 2–3 run local ONNX models behind the <code>ml</code> feature (prebuilt binaries omit it — the deps are large). Both routes compile from source, then fetch models at runtime.</p>
+    <p class="lead">Experimental and advisory. Layers 2 and 3 run local ONNX models behind the <code>ml</code> feature (prebuilt binaries omit it because the deps are large). Both routes compile from source, then fetch models at runtime.</p>
     <div class="code-block">
       <div class="bar"><div class="lights"><i></i><i></i><i></i></div><span class="title">shell</span><button class="copy-btn" data-copy="brew install Arthur920/tap/staleguard-ml
 staleguard setup
 staleguard check --layer 3">COPY</button></div>
-      <pre><span class="cm"># Homebrew — compiles with the ml feature</span>
+      <pre><span class="cm"># Homebrew: compiles with the ml feature</span>
 <span class="sigil">$ </span><span class="cmd">brew install</span> Arthur920/tap/staleguard-ml
 
 <span class="cm"># or with cargo</span>
@@ -742,20 +742,20 @@ staleguard check --layer 3">COPY</button></div>
   </div>
 
   <div class="panel" id="t-ci">
-    <p class="lead"><code>staleguard check</code> exits non-zero on any finding or a score regression — a drop-in for any pipeline. Commit a baseline on main, then gate PRs against it.</p>
+    <p class="lead"><code>staleguard check</code> exits non-zero on any finding or a score regression, so it drops into any pipeline. Commit a baseline on main, then gate PRs against it.</p>
     <div class="code-block">
       <div class="bar"><div class="lights"><i></i><i></i><i></i></div><span class="title">.github/workflows</span><button class="copy-btn" data-copy="staleguard check --write-ledger
 staleguard check --fail-on-regression --format json">COPY</button></div>
-      <pre><span class="cm"># once, on the base branch — records the alignment baseline</span>
+      <pre><span class="cm"># once, on the base branch: records the alignment baseline</span>
 <span class="sigil">$ </span><span class="cmd">staleguard check</span> <span class="flag">--write-ledger</span>
 
-<span class="cm"># in CI on each PR — fail only if alignment regressed</span>
+<span class="cm"># in CI on each PR: fail only if alignment regressed</span>
 <span class="sigil">$ </span><span class="cmd">staleguard check</span> <span class="flag">--fail-on-regression</span> <span class="flag">--format</span> json</pre>
     </div>
   </div>
 
   <div class="panel" id="t-agent">
-    <p class="lead">Staleguard speaks <code>--format json</code>, so any coding agent can run it and read findings back — directly via shell, or exposed as an MCP <code>check_doc_drift</code> tool.</p>
+    <p class="lead">Staleguard speaks <code>--format json</code>, so any coding agent can run it and read findings back, either directly through the shell or exposed as an MCP <code>check_doc_drift</code> tool.</p>
     <div class="code-block">
       <div class="bar"><div class="lights"><i></i><i></i><i></i></div><span class="title">agent</span><button class="copy-btn" data-copy="staleguard check --format json --diff main">COPY</button></div>
       <pre><span class="cm"># let the agent call it directly</span>
@@ -772,7 +772,7 @@ staleguard check --fail-on-regression --format json">COPY</button></div>
     <thead><tr><th>Variable</th><th>Effect</th></tr></thead>
     <tbody>
       <tr><td>STALEGUARD_NLI_REPO</td><td>NLI judge model repo (default <code style="color:var(--blade);font-family:'JetBrains Mono',monospace;font-size:.85em">Arthur920/staleguard</code>)</td></tr>
-      <tr><td>STALEGUARD_NLI_THRESHOLD<br>STALEGUARD_NLI_MARGIN</td><td>decision thresholds — how far contradiction must out-score entailment</td></tr>
+      <tr><td>STALEGUARD_NLI_THRESHOLD<br>STALEGUARD_NLI_MARGIN</td><td>decision thresholds: how far contradiction must out-score entailment</td></tr>
       <tr><td>STALEGUARD_NLI_MAX_CLAIMS</td><td>per-run claim budget (default 300; <code style="color:var(--blade);font-family:'JetBrains Mono',monospace;font-size:.85em">0</code> = no cap)</td></tr>
       <tr><td>STALEGUARD_EMBED_REPO</td><td>Layer 2 embedding model</td></tr>
       <tr><td>STALEGUARD_RERANK_REPO</td><td>optional reranker</td></tr>
@@ -789,7 +789,7 @@ staleguard check --fail-on-regression --format json">COPY</button></div>
           <img src="staleguard.png" alt="Staleguard shield">
           <span>Staleguard</span>
         </div>
-        <p class="footer-note">A heavily AI-assisted personal project — the architecture, layer design, evaluation, and the call on what was good enough to keep are mine; the deterministic core is built to be auditable precisely because generated code shouldn't be taken on faith.</p>
+        <p class="footer-note">A heavily AI-assisted personal project. The architecture, layer design, and evaluation are mine, and so is the decision on what was good enough to keep. The deterministic core is built to be auditable because generated code shouldn't be taken on faith.</p>
       </div>
       <div class="footer-links">
         <a href="https://github.com/Arthur920/Staleguard" target="_blank" rel="noopener">GitHub ↗</a>

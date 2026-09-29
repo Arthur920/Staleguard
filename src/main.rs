@@ -103,7 +103,7 @@ enum Commands {
         min_severity: Option<findings::Severity>,
         /// Restrict doc-vs-code checks to these doc paths (repeatable; matched by
         /// exact relative path or path suffix). Skips the repo-wide coverage and
-        /// history passes, so it is far cheaper — useful for checking a single
+        /// history passes, so it is far cheaper, useful for checking a single
         /// changed doc (and for keeping the Layer-3 judge to that doc's claims).
         #[arg(long = "doc")]
         docs: Vec<String>,
@@ -118,7 +118,7 @@ enum Commands {
         format: Format,
     },
     /// Audit which architecture rules are extracted from doc prose, and how each
-    /// fares against the code — so silent misses (a rule that didn't parse, or an
+    /// fares against the code, so silent misses (a rule that didn't parse, or an
     /// operand that grounds to no real module) become visible.
     Rules {
         /// Repo root (default: cwd).
@@ -190,7 +190,7 @@ pub(crate) fn collect_docs_filtered(root: &Path, filter: &[String]) -> Vec<PathB
 }
 
 /// Changelogs and release-note fragments document *past* states, so they
-/// legitimately name removed files, old symbols, and external versions — verbatim
+/// legitimately name removed files, old symbols, and external versions: verbatim
 /// history, not claims about the current code. Checking them only manufactures
 /// false drift, so they are excluded from the doc set.
 pub(crate) fn is_changelog_doc(path: &Path) -> bool {
@@ -267,7 +267,7 @@ fn run_check(
     // The repo's path list, walked once, so each doc's path claims match in
     // memory instead of re-walking the whole tree per claim.
     let repo_files = verify::repo_paths(root);
-    // The repo's internal module paths, computed once and shared — diagram
+    // The repo's internal module paths, computed once and shared; diagram
     // grounding needs it per embedded diagram, so building it here avoids
     // re-cloning every module name into a fresh set per documentation file.
     let modules = index.module_set();
@@ -347,7 +347,7 @@ fn run_check(
     if layer >= 3 {
         eprintln!(
             "note: layer 3 runs the code-aware NLI judge (staleguard); \
-             verdicts are advisory — review contradictions before acting."
+             verdicts are advisory; review contradictions before acting."
         );
         let mut claims = Vec::new();
         // Build the shared symbol lookup once; claim grounding reuses it per doc.
@@ -403,7 +403,7 @@ fn run_check(
 /// model and the Layer 3 NLI judge so the first real `check --layer 3` is fully
 /// offline (and any model auth/network error surfaces here, not mid-run).
 fn run_setup() -> ExitCode {
-    println!("Layer 1 (deterministic): ready — no model needed.");
+    println!("Layer 1 (deterministic): ready; no model needed.");
 
     #[cfg(not(feature = "ml"))]
     {

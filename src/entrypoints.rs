@@ -4,7 +4,7 @@
 //! final member exists nowhere as a symbol, the reference is `stale`.
 //!
 //! Scoped to *local* references to keep false positives at zero. A reference is
-//! only checked when its head segment anchors to this repo — a `crate`/`self`/
+//! only checked when its head segment anchors to this repo: a `crate`/`self`/
 //! `super` prefix, or a head that matches a known module segment or symbol name.
 //! `std::collections::HashMap` and `serde::Serialize` (external heads) are left
 //! alone. Grounding is over-approximate, mirroring `resolve_refs`: a member is
@@ -22,14 +22,14 @@ use crate::findings::{Finding, Verdict};
 
 /// Name sets distilled from the code index for resolving doc references.
 pub struct Grounding {
-    /// Every symbol name, qualified-name tail, and module-path segment — the
+    /// Every symbol name, qualified-name tail, and module-path segment: the
     /// pool a referenced member must hit to count as present.
     names: HashSet<String>,
     /// Heads that mark a reference as local: module segments + symbol names,
     /// plus the Rust path keywords.
     anchors: HashSet<String>,
     /// Names of type containers (struct/class/enum/trait/interface). Their
-    /// members — enum variants, methods, associated items — are not indexed as
+    /// members (enum variants, methods, associated items) are not indexed as
     /// standalone symbols, so a `Type::member` reference is unverifiable rather
     /// than drift. Module qualifiers are deliberately excluded: a module's
     /// functions *are* indexed, so `module::missing_fn` is real drift.
@@ -84,7 +84,7 @@ pub fn check(markdown: &str, doc_path: &str, g: &Grounding) -> Vec<Finding> {
     for (line, reference) in qualified_refs(markdown) {
         let segs: Vec<&str> = reference.split("::").collect();
         let Some(effective) = local_path(&segs, &g.anchors) else {
-            continue; // external or non-local — not our claim.
+            continue; // external or non-local; not our claim.
         };
         let Some(member) = effective.last() else {
             continue;
@@ -97,7 +97,7 @@ pub fn check(markdown: &str, doc_path: &str, g: &Grounding) -> Vec<Finding> {
         // The qualifier directly before the member (`MappingTarget` in
         // `MappingTarget::MapToUnknown`). Enum variants, methods and associated
         // items are not indexed as their own symbols, so a member access on a
-        // *known* type is unverifiable, not drift — ground it on the type.
+        // *known* type is unverifiable, not drift; ground it on the type.
         let qualifier = (effective.len() >= 2).then(|| effective[effective.len() - 2]);
         if g.names.contains(*member) {
             // Anchor to the member name; the drift changed-set includes symbol
@@ -130,7 +130,7 @@ pub fn check(markdown: &str, doc_path: &str, g: &Grounding) -> Vec<Finding> {
 
 /// Decide whether a `::` path is a local reference and, if so, return the
 /// segments that carry meaning (a leading `crate`/`self`/`super` run is
-/// stripped). `None` means the head is external — skip it.
+/// stripped). `None` means the head is external; skip it.
 fn local_path<'a>(segs: &'a [&'a str], anchors: &HashSet<String>) -> Option<&'a [&'a str]> {
     const KEYWORDS: &[&str] = &["crate", "self", "super"];
     let mut rest = segs;
@@ -266,7 +266,7 @@ mod tests {
     #[test]
     fn enum_variant_of_known_type_is_not_flagged() {
         let g = grounding();
-        // `MapToUnknown` is an enum variant — not indexed as its own symbol —
+        // `MapToUnknown` is an enum variant (not indexed as its own symbol),
         // but `MappingTarget` is a real enum, so the reference is unverifiable,
         // not drift.
         let f = check("Use `MappingTarget::MapToUnknown`.", "README.md", &g);
@@ -277,7 +277,7 @@ mod tests {
     fn missing_fn_in_known_module_is_still_flagged() {
         let g = grounding();
         // `verify` is a module (not a type); its functions are indexed, so a
-        // missing one is genuine drift — the type fallback must not mask it.
+        // missing one is genuine drift; the type fallback must not mask it.
         let flagged = check("Call `verify::deleted_fn`.", "README.md", &g);
         assert_eq!(flagged.len(), 1, "{flagged:?}");
     }

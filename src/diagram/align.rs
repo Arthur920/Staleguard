@@ -1,7 +1,7 @@
 //! Sequence-diagram alignment (Layer 1, deterministic). Aligns a sequence
 //! diagram's ordered message steps against the code's ordered call sequence
-//! (`Symbol.calls`) with a Needleman–Wunsch global alignment, exact-name
-//! substitution — no embeddings (semantic substitution is Layer 2). The trace
+//! (`Symbol.calls`) with a Needleman-Wunsch global alignment, exact-name
+//! substitution: no embeddings (semantic substitution is Layer 2). The trace
 //! *is* the explanation: matched steps are coherent, gaps and substitutions are
 //! missing / undrawn / out-of-order steps.
 //!
@@ -58,7 +58,7 @@ fn ground<'a>(steps: &[String], index: &'a CodeIndex) -> Option<&'a Symbol> {
 }
 
 /// Count of diagram steps that appear somewhere in the code calls (set overlap),
-/// the grounding heuristic — order is judged later by the alignment itself.
+/// the grounding heuristic; order is judged later by the alignment itself.
 fn overlap(steps: &[String], calls: &[String]) -> usize {
     steps
         .iter()
@@ -70,9 +70,9 @@ fn overlap(steps: &[String], calls: &[String]) -> usize {
 enum Op {
     /// Both consumed: a substitution (match when equal).
     Sub,
-    /// Diagram step consumed, code gap — a step the code never makes.
+    /// Diagram step consumed, code gap: a step the code never makes.
     DiagramOnly,
-    /// Code call consumed, diagram gap — a call the diagram omits.
+    /// Code call consumed, diagram gap: a call the diagram omits.
     CodeOnly,
 }
 
@@ -101,7 +101,7 @@ fn emit(seq: &Sequence, steps: &[String], driver: &Symbol) -> Vec<Finding> {
                             format!("sequence step `{d}`"),
                             seq.origin.clone(),
                             format!(
-                                "Out-of-order step: the diagram's step `{d}` aligns to code call `{c}` in `{}` — wrong call or wrong order.",
+                                "Out-of-order step: the diagram's step `{d}` aligns to code call `{c}` in `{}`; wrong call or wrong order.",
                                 driver.name
                             ),
                         )
@@ -148,7 +148,7 @@ fn emit(seq: &Sequence, steps: &[String], driver: &Symbol) -> Vec<Finding> {
     out
 }
 
-/// Needleman–Wunsch global alignment of `steps` (rows) vs `calls` (cols); returns
+/// Needleman-Wunsch global alignment of `steps` (rows) vs `calls` (cols); returns
 /// the traceback as an ordered op list from start to end.
 fn align(steps: &[String], calls: &[String]) -> Vec<Op> {
     let (m, n) = (steps.len(), calls.len());

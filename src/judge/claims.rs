@@ -1,7 +1,7 @@
 //! Candidate-claim extraction for the Layer 3 judge.
 //!
-//! Pull behavioural propositions out of doc prose — complete sentences/bullets
-//! that reference code and read like assertions — and ground each claim's
+//! Pull behavioural propositions out of doc prose (complete sentences/bullets
+//! that reference code and read like assertions) and ground each claim's
 //! backtick tokens to the code index. Deliberately heuristic (the NLI judge is
 //! the real filter), but it only hands the model *propositions*: soft-wrapped
 //! lines are reassembled, and fragments/quoted examples/feature entries dropped.
@@ -18,7 +18,7 @@ use super::ProseClaim;
 /// Pull candidate behavioural claims from doc prose: complete sentences/bullets
 /// that reference code (an inline backtick span) and read like an assertion. Each
 /// claim's backtick tokens are grounded to the code index. Deliberately heuristic
-/// — the NLI judge is the filter — but the NLI model is text-trained and brittle,
+/// (the NLI judge is the filter), but the NLI model is text-trained and brittle,
 /// so we only hand it *propositions*: soft-wrapped lines are reassembled into one
 /// logical claim (so it isn't judged as a truncated fragment), and sentence
 /// fragments and quoted illustrative examples are dropped. Skips fenced code,
@@ -110,8 +110,8 @@ fn is_numbered_item(line: &str) -> bool {
     !digits.is_empty() && line[digits.len()..].starts_with(['.', ')'])
 }
 
-/// True when the line ends mid-clause — a trailing comma/semicolon or a dangling
-/// conjunction/preposition/article — i.e. it is a fragment, not a full assertion.
+/// True when the line ends mid-clause (a trailing comma/semicolon or a dangling
+/// conjunction/preposition/article), i.e. it is a fragment, not a full assertion.
 fn is_fragment(s: &str) -> bool {
     let trimmed = s.trim_end_matches(|c: char| c.is_whitespace());
     if trimmed.ends_with(',') || trimmed.ends_with(';') || trimmed.ends_with(':') {
@@ -143,7 +143,7 @@ fn is_feature_entry(s: &str) -> bool {
 }
 
 /// A claim that opens with a lowercase letter is a list continuation or sentence
-/// fragment — a real assertion opens with a capital or a code span. Leading
+/// fragment; a real assertion opens with a capital or a code span. Leading
 /// emphasis markers are unwrapped first; a leading backtick code span is kept.
 fn starts_lowercase(s: &str) -> bool {
     let t = s.trim_start_matches(['*', '_', ' ']);
@@ -173,7 +173,7 @@ fn is_quoted_example(s: &str) -> bool {
 }
 
 /// Ground a claim's backtick tokens to code: each token that names an indexed
-/// symbol becomes a symbol anchor (preferred — survives moves), else a module
+/// symbol becomes a symbol anchor (preferred, since it survives moves), else a module
 /// anchor if it matches a real module path. Tokens that match neither (paths,
 /// commands, prose) are ignored.
 pub(super) fn ground_claim(line: &str, lookup: &SymbolLookup) -> Provenance {

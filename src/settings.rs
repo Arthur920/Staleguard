@@ -1,9 +1,9 @@
 //! Optional per-repo configuration read from `.staleguard.toml` at the repo
-//! root. Everything here is opt-in: with no config file the defaults reproduce
-//! the previous behaviour exactly (check every doc, report every verdict).
+//! root. Everything here is opt-in: with no config file the defaults check every
+//! doc and report every verdict.
 //!
 //! ```toml
-//! # .staleguard.toml — all keys optional
+//! # .staleguard.toml (all keys optional)
 //!
 //! # Doc paths to skip entirely, as glob patterns matched against the path
 //! # relative to the repo root (`*` matches within a path segment, `**` across
