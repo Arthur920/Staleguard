@@ -131,7 +131,130 @@ fn extract_claims(markdown: &str, doc_path: &str) -> Vec<ConstClaim> {
             });
         }
     }
+    out.extend(extract_table_claims(markdown, doc_path, &fenced));
     out
+}
+
+/// Pull claims out of markdown tables with a `Default` column — the dominant
+/// way config docs state defaults (`| PORT | 8080 | ... |`). The same trust
+/// rules as the sentence path apply: the symbol cell must be backticked or
+/// code-shaped, and a bare value is only read as a number/bool.
+fn extract_table_claims(markdown: &str, doc_path: &str, fenced: &[bool]) -> Vec<ConstClaim> {
+    let mut out = Vec::new();
+    let lines: Vec<&str> = markdown.lines().collect();
+    let mut i = 0;
+    while i + 1 < lines.len() {
+        let (header, sep) = (lines[i].trim(), lines[i + 1].trim());
+        if fenced[i] || !header.starts_with('|') || !is_table_separator(sep) {
+            i += 1;
+            continue;
+        }
+        let cols = table_cells(header);
+        let default_col = cols
+            .iter()
+            .position(|c| matches!(plain_cell(c).as_str(), "default" | "default value"));
+        let Some(default_col) = default_col else {
+            i += 2;
+            continue;
+        };
+        // The key column: a conventionally-named header, else the first column.
+        let symbol_col = cols
+            .iter()
+            .position(|c| {
+                matches!(
+                    plain_cell(c).as_str(),
+                    "name"
+                        | "option"
+                        | "variable"
+                        | "key"
+                        | "setting"
+                        | "parameter"
+                        | "field"
+                        | "property"
+                        | "flag"
+                        | "env var"
+                        | "environment variable"
+                )
+            })
+            .unwrap_or(0);
+        i += 2;
+        while i < lines.len() && lines[i].trim().starts_with('|') && !fenced[i] {
+            let cells = table_cells(lines[i].trim());
+            if let (Some(sym), Some(val)) = (cells.get(symbol_col), cells.get(default_col)) {
+                if let (Some(symbol), Some(value)) = (table_symbol(sym), table_value(val)) {
+                    out.push(ConstClaim {
+                        symbol,
+                        value,
+                        origin: format!("{doc_path}:{}", i + 1),
+                        phrase: lines[i].trim().to_string(),
+                    });
+                }
+            }
+            i += 1;
+        }
+    }
+    out
+}
+
+/// `| a | b |` → trimmed cell texts.
+fn table_cells(row: &str) -> Vec<String> {
+    row.trim()
+        .trim_start_matches('|')
+        .trim_end_matches('|')
+        .split('|')
+        .map(|c| c.trim().to_string())
+        .collect()
+}
+
+/// A cell's text with backticks/bold stripped, lowercased — for header matching.
+fn plain_cell(cell: &str) -> String {
+    cell.trim_matches(['`', '*', ' ']).to_ascii_lowercase()
+}
+
+/// A `|---|:---:|` separator row.
+fn is_table_separator(line: &str) -> bool {
+    line.starts_with('|')
+        && line.contains('-')
+        && line.chars().all(|c| matches!(c, '|' | '-' | ':' | ' '))
+}
+
+/// The symbol a table row's key cell anchors to: a backticked identifier is
+/// always trusted; a bare one only when code-shaped (same rule as prose).
+fn table_symbol(cell: &str) -> Option<String> {
+    let cell = cell.trim().trim_matches('*').trim();
+    if let Some(inner) = cell.strip_prefix('`').and_then(|c| c.strip_suffix('`')) {
+        let inner = inner.trim();
+        if is_identifier(inner) {
+            return Some(inner.to_string());
+        }
+        return None;
+    }
+    if is_identifier(cell) && is_code_shaped(cell) {
+        return Some(cell.to_string());
+    }
+    None
+}
+
+fn is_identifier(s: &str) -> bool {
+    let mut chars = s.chars();
+    chars
+        .next()
+        .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+        && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+}
+
+/// A table row's default-cell value. Delimited content may be a string;
+/// bare content only a number/bool — mirroring the sentence path exactly.
+fn table_value(cell: &str) -> Option<Value> {
+    let cell = cell.trim();
+    if let Some(inner) = cell
+        .strip_prefix('`')
+        .and_then(|c| c.strip_suffix('`'))
+        .or_else(|| cell.strip_prefix('"').and_then(|c| c.strip_suffix('"')))
+    {
+        return parse_delimited(inner.trim());
+    }
+    parse_value(cell)
 }
 
 /// `<identifier> <cue> <value>` where the cue is an explicit default /
@@ -753,6 +876,64 @@ mod tests {
             verdicts("`strict` defaults to `True`", &idx),
             vec![Verdict::Supported]
         );
+    }
+
+    #[test]
+    fn table_default_column_grounds_claims() {
+        let md = "\
+| Option | Default | Description |
+|--------|---------|-------------|
+| `port` | 8080 | listen port |
+| `region` | `us-east-1` | AWS region |
+| `verbose` | false | log level |
+";
+        // int swap fires; string agrees; bool agrees.
+        let idx = index_of(vec![
+            sym("port", &["5432"]),
+            sym("region", &["\"us-east-1\""]),
+            sym("verbose", &["false"]),
+        ]);
+        let v = verdicts(md, &idx);
+        assert_eq!(
+            v,
+            vec![
+                Verdict::Contradicted,
+                Verdict::Supported,
+                Verdict::Supported
+            ]
+        );
+    }
+
+    #[test]
+    fn table_without_default_header_is_silent() {
+        // A value-bearing table with no Default column asserts nothing.
+        let md = "\
+| Option | Example |
+|--------|---------|
+| `port` | 9999 |
+";
+        let idx = index_of(vec![sym("port", &["5432"])]);
+        assert!(check(md, "README.md", &idx).is_empty());
+    }
+
+    #[test]
+    fn table_bare_symbol_needs_code_shape() {
+        let md = "\
+| Name | Default |
+|------|---------|
+| MAX_RETRIES | 5 |
+| report | 5 |
+";
+        // SCREAMING bare cell is trusted; a plain English word is not.
+        let idx = index_of(vec![sym("MAX_RETRIES", &["3"]), sym("report", &["3"])]);
+        assert_eq!(verdicts(md, &idx), vec![Verdict::Contradicted]);
+    }
+
+    #[test]
+    fn fenced_table_is_not_a_claim() {
+        let md = "```\n| Option | Default |\n|---|---|\n| `port` | 9999 |\n```";
+        let idx = index_of(vec![sym("port", &["5432"])]);
+        assert!(check(md, "README.md", &idx).is_empty());
     }
 
     #[test]
