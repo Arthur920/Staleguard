@@ -99,13 +99,33 @@ fn gitignore_candidates(c: &PathClaim) -> Vec<String> {
 /// The `name` of every `package.json` in the repo (from the pre-walked path
 /// list), so paths into the repo's own published packages can be recognized.
 pub fn package_names(repo_files: &[String]) -> HashSet<String> {
+    package_jsons(repo_files)
+        .filter_map(|v| v.get("name")?.as_str().map(str::to_string))
+        .collect()
+}
+
+/// Every script name declared by any `package.json` in the repo.
+pub fn package_scripts(repo_files: &[String]) -> HashSet<String> {
+    package_jsons(repo_files)
+        .filter_map(|v| {
+            Some(
+                v.get("scripts")?
+                    .as_object()?
+                    .keys()
+                    .cloned()
+                    .collect::<Vec<_>>(),
+            )
+        })
+        .flatten()
+        .collect()
+}
+
+fn package_jsons(repo_files: &[String]) -> impl Iterator<Item = serde_json::Value> + '_ {
     repo_files
         .iter()
         .filter(|p| p.ends_with("/package.json") || p.as_str() == "package.json")
         .filter_map(|p| std::fs::read_to_string(p).ok())
-        .filter_map(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
-        .filter_map(|v| v.get("name")?.as_str().map(str::to_string))
-        .collect()
+        .filter_map(|t| serde_json::from_str(&t).ok())
 }
 
 /// Layer 1: every path a doc names by backtick should exist in the repo. Emits

@@ -116,7 +116,7 @@ pub(crate) fn collect_docs(root: &Path) -> Vec<PathBuf> {
 /// An empty filter means "every doc" (the changelog exclusion still applies).
 pub(crate) fn collect_docs_filtered(root: &Path, filter: &[String]) -> Vec<PathBuf> {
     let mut site_cache: HashMap<PathBuf, bool> = HashMap::new();
-    WalkDir::new(root)
+    let docs: Vec<PathBuf> = WalkDir::new(root)
         .into_iter()
         .filter_entry(|e| !crate::code::lang::is_skip_dir(&e.file_name().to_string_lossy()))
         .filter_map(|e| e.ok())
@@ -140,6 +140,18 @@ pub(crate) fn collect_docs_filtered(root: &Path, filter: &[String]) -> Vec<PathB
                 .iter()
                 .any(|f| rel == f.as_str() || rel.ends_with(f.as_str()))
         })
+        .collect();
+    // Gitignored docs (tool scratch copies like `.stryker-tmp/`, local notes)
+    // are not the repo's documentation.
+    let rel = |p: &PathBuf| {
+        p.strip_prefix(root)
+            .unwrap_or(p)
+            .to_string_lossy()
+            .into_owned()
+    };
+    let ignored = git::ignored(root, &docs.iter().map(rel).collect::<Vec<_>>());
+    docs.into_iter()
+        .filter(|p| !ignored.contains(&rel(p)))
         .collect()
 }
 
@@ -194,7 +206,7 @@ fn in_docs_site(doc: &Path, root: &Path, cache: &mut HashMap<PathBuf, bool>) -> 
 
 /// Changelogs and release-note fragments document *past* states, so they
 /// legitimately name removed files, old symbols, and external versions: verbatim
-/// history, not claims about the current code. Checking them only manufactures
+/// history, not claims about the current code. ADRs likewise. Checking them only manufactures
 /// false drift, so they are excluded from the doc set.
 pub(crate) fn is_changelog_doc(path: &Path) -> bool {
     let name = path
@@ -228,6 +240,10 @@ pub(crate) fn is_changelog_doc(path: &Path) -> bool {
                 | Some("changelog")
                 | Some("news.d")
                 | Some("newsfragments")
+                // Architecture decision records: dated history by design.
+                | Some("adr")
+                | Some("adrs")
+                | Some("decisions")
         )
     })
 }
@@ -269,12 +285,14 @@ fn run_check(
     // memory instead of re-walking the whole tree per claim.
     let repo_files = verify::repo_paths(root);
     let pkg_names = verify::package_names(&repo_files);
+    let pkg_scripts = verify::package_scripts(&repo_files);
     let ctx = check::CheckContext {
         root,
         grounding: &grounding,
         code_tokens: &code_tokens,
         repo_files: &repo_files,
         pkg_names: &pkg_names,
+        pkg_scripts: &pkg_scripts,
     };
     let doc_checks = check::doc_checks();
 

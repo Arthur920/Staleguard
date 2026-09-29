@@ -28,6 +28,8 @@ pub(crate) struct CheckContext<'a> {
     pub repo_files: &'a [String],
     /// `name` of every `package.json`, for paths into the repo's own packages.
     pub pkg_names: &'a std::collections::HashSet<String>,
+    /// Every script any `package.json` in the repo defines.
+    pub pkg_scripts: &'a std::collections::HashSet<String>,
 }
 
 /// One documentation file in flight: its text, its repo-relative path (used as the
@@ -60,8 +62,8 @@ impl DocCheck for PathCheck {
 /// Documented commands with no matching npm script / make target / cargo bin.
 struct CommandCheck;
 impl DocCheck for CommandCheck {
-    fn check(&self, doc: &Doc, _ctx: &CheckContext) -> Vec<Finding> {
-        commands::check(&doc.text, &doc.rel, &doc.manifests)
+    fn check(&self, doc: &Doc, ctx: &CheckContext) -> Vec<Finding> {
+        commands::check(&doc.text, &doc.rel, &doc.manifests, ctx.pkg_scripts)
     }
 }
 

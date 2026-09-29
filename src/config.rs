@@ -87,7 +87,7 @@ fn check_env_vars(
                 Verdict::Stale,
                 claim,
                 doc_ref,
-                format!("Env var `{name}` is named in docs but read nowhere in the code."),
+                format!("`{name}` is named in docs but appears nowhere in the code."),
             ));
         }
     }

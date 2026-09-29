@@ -305,7 +305,16 @@ enum Target<'a> {
 /// that resolves to a declared target yields a `Supported` claim anchored to
 /// the manifest that declares it; one that names a missing target yields a
 /// `Stale` claim. Commands with no manifest to check against are skipped.
-pub fn check(markdown: &str, doc_path: &str, m: &Manifests) -> Vec<Finding> {
+///
+/// `repo_scripts` is every script any `package.json` in the repo defines: a
+/// root README's "Frontend (`packages/frontend/`)" section runs scripts from
+/// that package, so a script is only missing if no package defines it.
+pub fn check(
+    markdown: &str,
+    doc_path: &str,
+    m: &Manifests,
+    repo_scripts: &HashSet<String>,
+) -> Vec<Finding> {
     let mut findings = Vec::new();
     for (line, cmd) in command_lines(markdown) {
         let toks: Vec<&str> = cmd.split_whitespace().collect();
@@ -324,7 +333,8 @@ pub fn check(markdown: &str, doc_path: &str, m: &Manifests) -> Vec<Finding> {
         let doc_ref = format!("{doc_path}:{line}");
         let prov = Provenance::path(manifest);
         let dep_bin = matches!(target, Target::RunnerScript(_)) && m.npm_dep_bins.contains(name);
-        if registry.contains(name) || dep_bin {
+        let npm = matches!(target, Target::NpmScript(_) | Target::RunnerScript(_));
+        if registry.contains(name) || dep_bin || (npm && repo_scripts.contains(name)) {
             findings.push(Finding::supported(format!("runs `{cmd}`"), doc_ref, prov));
         } else {
             findings.push(
@@ -345,12 +355,21 @@ pub fn check(markdown: &str, doc_path: &str, m: &Manifests) -> Vec<Finding> {
 
 /// Resolve a tokenized command to the registry entry it depends on, if any.
 fn classify<'a>(toks: &[&'a str]) -> Option<Target<'a>> {
-    match *toks.first()? {
+    let first = *toks.first()?;
+    // ponytail: workspace-targeted runs are skipped, not resolved against the
+    // workspace's package.json; resolve them if they turn out to rot often.
+    if matches!(first, "npm" | "pnpm" | "yarn") && toks.iter().any(|t| is_workspace_flag(t)) {
+        return None;
+    }
+    match first {
         "npm" => {
             // Only the explicit `npm run <script>` form; bare `npm test` etc.
             // have npm built-in defaults and are not script-guaranteed.
             if toks.get(1) == Some(&"run") {
-                toks.get(2).map(|s| Target::NpmScript(s))
+                toks[2..]
+                    .iter()
+                    .find(|t| !t.starts_with('-'))
+                    .map(|s| Target::NpmScript(s))
             } else {
                 None
             }
@@ -376,6 +395,24 @@ fn classify<'a>(toks: &[&'a str]) -> Option<Target<'a>> {
         "make" => make_target(&toks[1..]).map(Target::Make),
         _ => None,
     }
+}
+
+/// Flags that point npm/pnpm/yarn at another package's `package.json`
+/// (`npm run x -w pkg`, `pnpm --filter pkg x`, `yarn workspace pkg x`).
+fn is_workspace_flag(t: &str) -> bool {
+    matches!(
+        t,
+        "-w" | "--workspace"
+            | "--filter"
+            | "-F"
+            | "-C"
+            | "--dir"
+            | "--prefix"
+            | "workspace"
+            | "workspaces"
+    ) || ["--workspace=", "--filter=", "--dir=", "--prefix="]
+        .iter()
+        .any(|p| t.starts_with(p))
 }
 
 /// pnpm/yarn run scripts directly (`yarn build` == `yarn run build`). Resolve
@@ -469,7 +506,7 @@ mod tests {
         .unwrap();
         let m = Manifests::load(&dir);
         let md = "Run `npm run build` then `npm run deploy`.";
-        let flagged: Vec<String> = check(md, "README.md", &m)
+        let flagged: Vec<String> = check(md, "README.md", &m, &HashSet::new())
             .iter()
             .filter(|f| f.verdict.is_reportable())
             .map(|f| f.detail.clone())
@@ -479,10 +516,45 @@ mod tests {
     }
 
     #[test]
+    fn workspace_targeted_runs_are_skipped() {
+        let dir = scratch("ws");
+        fs::write(
+            dir.join("package.json"),
+            r#"{"name":"x","scripts":{"build":"tsc"}}"#,
+        )
+        .unwrap();
+        let m = Manifests::load(&dir);
+        let md = "`npm run eval -w packages/backend` `npm run --workspace=backend eval` \
+                  `pnpm --filter api seed` `yarn workspace api seed` `npm run --silent gone`";
+        let flagged: Vec<String> = check(md, "README.md", &m, &HashSet::new())
+            .iter()
+            .filter(|f| f.verdict.is_reportable())
+            .map(|f| f.detail.clone())
+            .collect();
+        assert_eq!(flagged.len(), 1, "{flagged:?}");
+        assert!(flagged[0].contains("`gone`"));
+    }
+
+    #[test]
+    fn script_defined_by_another_package_is_not_missing() {
+        let dir = scratch("reposcripts");
+        fs::write(dir.join("package.json"), r#"{"name":"x","scripts":{}}"#).unwrap();
+        let m = Manifests::load(&dir);
+        let repo: HashSet<String> = ["preview".to_string()].into();
+        let md = "`npm run preview` `npm run gone`";
+        let flagged: Vec<_> = check(md, "README.md", &m, &repo)
+            .into_iter()
+            .filter(|f| f.verdict.is_reportable())
+            .collect();
+        assert_eq!(flagged.len(), 1);
+        assert!(flagged[0].detail.contains("`gone`"));
+    }
+
+    #[test]
     fn no_package_json_means_no_npm_findings() {
         let dir = scratch("nopkg");
         let m = Manifests::load(&dir);
-        assert!(check("`npm run anything`", "README.md", &m).is_empty());
+        assert!(check("`npm run anything`", "README.md", &m, &HashSet::new()).is_empty());
     }
 
     #[test]
@@ -495,7 +567,7 @@ mod tests {
         .unwrap();
         let m = Manifests::load(&dir);
         let md = "```sh\nmake build\nmake test\nmake nope\n```";
-        let flagged: Vec<String> = check(md, "README.md", &m)
+        let flagged: Vec<String> = check(md, "README.md", &m, &HashSet::new())
             .iter()
             .filter(|f| f.verdict.is_reportable())
             .map(|f| f.detail.clone())
@@ -514,7 +586,7 @@ mod tests {
         fs::write(sub.join("Makefile"), "build-dev:\n\tcargo build\n").unwrap();
         let m = Manifests::load_nearest(&sub, &dir);
         let md = "```sh\nmake build-dev\nmake ghost\n```";
-        let flagged: Vec<String> = check(md, "subproj/README.md", &m)
+        let flagged: Vec<String> = check(md, "subproj/README.md", &m, &HashSet::new())
             .iter()
             .filter(|f| f.verdict.is_reportable())
             .map(|f| f.detail.clone())
@@ -535,7 +607,7 @@ mod tests {
         fs::write(dir.join("src/main.rs"), "fn main() {}\n").unwrap();
         let m = Manifests::load(&dir);
         let md = "`cargo run --bin staleguard` works; `cargo run --bin ghost` does not.";
-        let flagged: Vec<String> = check(md, "README.md", &m)
+        let flagged: Vec<String> = check(md, "README.md", &m, &HashSet::new())
             .iter()
             .filter(|f| f.verdict.is_reportable())
             .map(|f| f.detail.clone())
@@ -551,7 +623,7 @@ mod tests {
         let m = Manifests::load(&dir);
         // `cargo new --bin foo` creates a project; `foo` is not a target here.
         let md = "Run `cargo new --bin mdbook-wordcount` to start.";
-        assert!(check(md, "README.md", &m).is_empty());
+        assert!(check(md, "README.md", &m, &HashSet::new()).is_empty());
     }
 
     #[test]
@@ -561,7 +633,13 @@ mod tests {
         fs::write(dir.join("Cargo.toml"), "[package]\nname = \"x\"\n").unwrap();
         let m = Manifests::load(&dir);
         // npm test / cargo build / make (default) carry no named target.
-        assert!(check("`npm test` and `cargo build`", "README.md", &m).is_empty());
+        assert!(check(
+            "`npm test` and `cargo build`",
+            "README.md",
+            &m,
+            &HashSet::new()
+        )
+        .is_empty());
     }
 
     #[test]
@@ -579,6 +657,7 @@ mod tests {
             "`yarn add foo` `yarn build` `pnpm tsx x.ts` `yarn lint` `pnpm test`",
             "README.md",
             &m,
+            &HashSet::new(),
         )
         .iter()
         .filter(|f| f.verdict.is_reportable())
