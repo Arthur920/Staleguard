@@ -6,7 +6,7 @@
 <title>Staleguard: guard your docs against drift</title>
 <meta name="description" content="Staleguard catches documentation drift: places where your CLAUDE.md, READMEs, and docs claim something the code no longer backs up. It runs locally and offline and is tuned for zero false positives.">
 <meta property="og:title" content="Staleguard">
-<meta property="og:description" content="Catch documentation drift, fully local and offline. A deterministic core tuned for zero false positives, plus an experimental, opt-in local ML layer.">
+<meta property="og:description" content="Catch documentation drift, fully local and offline. Deterministic and tuned for zero false positives.">
 <meta property="og:image" content="staleguard.png">
 <link rel="icon" type="image/png" href="favicon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -163,7 +163,7 @@
     right: calc(50% - 50vw);
     width: 56vw;
     z-index: 0;
-    background: url("knight.png") right center / cover no-repeat;
+    background: url("knight.webp") right center / cover no-repeat;
     pointer-events: none;
     /* Box-relative edge fades. These must be relative to the box, not the
        image: `cover` crops the image differently at every viewport width, so
@@ -330,8 +330,6 @@
   }
   .layer-meta .accent { color: var(--accent); display: block; margin-top: 4px; }
   .layer.l1 { --accent: var(--good); }
-  .layer.l2 { --accent: var(--blade); }
-  .layer.l3 { --accent: var(--brass); }
   @media (max-width: 760px) {
     .layer { grid-template-columns: 60px 1fr; padding: 24px; gap: 18px; }
     .layer-num { font-size: 2.4rem; }
@@ -362,23 +360,6 @@
     .l1-flow { grid-template-columns: 1fr; }
     .l1-step + .l1-step { border-left: none; border-top: 1px solid var(--edge); }
   }
-  /* experimental layers: visually subordinate to Layer 1 */
-  .exp-head {
-    font-family: "JetBrains Mono", monospace; font-size: 0.7rem;
-    letter-spacing: 0.18em; text-transform: uppercase; color: var(--ash);
-    margin-top: 34px; margin-bottom: 14px; display: flex; align-items: center; gap: 12px;
-  }
-  .exp-head::after { content: ""; flex: 1; height: 1px; background: var(--edge); }
-  .exp-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
-  @media (max-width: 760px) { .exp-grid { grid-template-columns: 1fr; } }
-  .layer.exp {
-    grid-template-columns: 52px 1fr; gap: 18px; padding: 20px 22px;
-    background: var(--iron); opacity: 0.72; transition: opacity .3s, border-color .3s, transform .3s;
-  }
-  .layer.exp:hover { opacity: 1; }
-  .layer.exp .layer-num { font-size: 2rem; opacity: 0.5; }
-  .layer.exp .layer-body h3 { font-size: 1.08rem; }
-  .layer.exp .layer-body p { font-size: 0.9rem; }
   .ledger-note {
     font-family: "JetBrains Mono", monospace; font-size: 0.78rem;
     color: var(--ash); text-align: center; margin-top: 26px; letter-spacing: 0.04em;
@@ -556,7 +537,7 @@
     <div class="hero-tag stagger"><span class="dot"></span><span>fully local · offline · zero false positives</span></div>
     <h1 class="stagger">Stale<span class="em">guard</span></h1>
     <div class="hero-sub stagger">Guard your docs against drift</div>
-    <p class="hero-desc stagger">Catches the places where your <strong>CLAUDE.md</strong>, READMEs, <code>*.md</code> docs, and <strong>architecture diagrams</strong> claim something the code no longer backs up. Checks docs and Mermaid / PlantUML / Graphviz against the <strong>actual codebase</strong> and reports what's stale, wrong, or missing.</p>
+    <p class="hero-desc stagger">Catches the places where your <strong>CLAUDE.md</strong>, READMEs, <code>*.md</code> docs, and <strong>architecture diagrams</strong> claim something the code no longer backs up. Checks docs and Mermaid diagrams against the <strong>actual codebase</strong> and reports what's stale, wrong, or missing.</p>
     <div class="install-line stagger">
       <code><span class="sigil">$ </span>brew install Arthur920/tap/staleguard</code>
       <button class="copy-btn" data-copy="brew install Arthur920/tap/staleguard">COPY</button>
@@ -573,15 +554,15 @@
 <!-- LAYERS -->
 <section id="layers" class="wrap">
   <p class="eyebrow reveal">The architecture</p>
-  <h2 class="section-title reveal">A deterministic core, plus an experimental ML layer</h2>
-  <p class="section-lead reveal">Layer&nbsp;1 is the tool. It is deterministic, instant, shipped in every build, and tuned for zero false positives. Layers&nbsp;2 and 3 are an opt-in ML extension that tries to catch behavioral drift the core can't; they are useful but advisory. Everything runs locally, and code never leaves the machine.</p>
+  <h2 class="section-title reveal">Deterministic, from docs to verdict</h2>
+  <p class="section-lead reveal">No models, no network: every check is deterministic, instant, and tuned for zero false positives. Everything runs locally, and code never leaves the machine.</p>
 
   <div class="layers-grid stagger">
     <div class="layer l1">
       <div class="layer-num">I</div>
       <div class="layer-body">
-        <h3>Deterministic <span style="font-family:'JetBrains Mono',monospace;font-size:.6em;letter-spacing:.12em;color:var(--good);vertical-align:middle">· DEFAULT</span></h3>
-        <p>Paths exist? Commands real? Config keys present? Architecture rules parsed from prose, checked against the real import graph. It uses no ML and is tuned for zero false positives. This is the part you can trust without conditions.</p>
+        <h3>Deterministic</h3>
+        <p>Paths exist? Commands real? Config keys present? Architecture rules parsed from prose, checked against the real import graph. It uses no ML and is tuned for zero false positives.</p>
       </div>
       <div class="layer-meta">instant · no model<span class="accent">~1.2s on 330k LOC</span></div>
     </div>
@@ -610,23 +591,6 @@
     </div>
   </div>
 
-  <p class="exp-head reveal">Optional ML extension · experimental</p>
-  <div class="exp-grid stagger">
-    <div class="layer l2 exp">
-      <div class="layer-num">II</div>
-      <div class="layer-body">
-        <h3>Retrieval</h3>
-        <p>For each surviving claim, local embeddings fetch the most relevant code chunks, split on tree-sitter symbol boundaries, with an optional reranker.</p>
-      </div>
-    </div>
-    <div class="layer l3 exp">
-      <div class="layer-num">III</div>
-      <div class="layer-body">
-        <h3>Verification</h3>
-        <p>A code-aware NLI cross-encoder judges <code style="font-family:'JetBrains Mono',monospace;font-size:.85em;color:var(--blade)">(evidence, claim)</code> → supported · contradicted · unverifiable. Treat it as a high-precision hint to go look, not as a gate.</p>
-      </div>
-    </div>
-  </div>
   <p class="ledger-note reveal">Underneath sits a <b>drift ledger</b> that makes runs incremental, scores alignment, and gates CI on regressions.</p>
 </section>
 
@@ -635,7 +599,7 @@
 <!-- DETECT -->
 <section id="detect" class="wrap">
   <p class="eyebrow reveal">What it catches</p>
-  <h2 class="section-title reveal">Six classes of documentation drift</h2>
+  <h2 class="section-title reveal">Five classes of documentation drift</h2>
 
   <div class="feat-grid stagger">
     <div class="feat">
@@ -659,16 +623,6 @@
       </ul>
     </div>
     <div class="feat">
-      <span class="glyph">// BEHAVIOR · EXPERIMENTAL</span>
-      <h3>Behavioral contradictions</h3>
-      <ul>
-        <li>a local NLI cross-encoder judges prose the rules can't</li>
-        <li>verdicts: supported / contradicted / unverifiable</li>
-        <li>claims ground to symbols, so a verdict re-opens when that code changes</li>
-        <li>opt-in <code>ml</code> build · advisory, not a gate</li>
-      </ul>
-    </div>
-    <div class="feat">
       <span class="glyph">// COVERAGE</span>
       <h3>Coverage gaps</h3>
       <ul>
@@ -680,7 +634,8 @@
       <span class="glyph">// DIAGRAMS</span>
       <h3>Diagram coherence</h3>
       <ul>
-        <li>Mermaid / PlantUML / Graphviz diffed against the real graph</li>
+        <li>Mermaid flowcharts diffed against the real import graph</li>
+        <li>Mermaid class diagrams checked against real types</li>
         <li>phantom edges, stale boxes, missing arrows</li>
       </ul>
     </div>
@@ -700,17 +655,16 @@
 <section id="install" class="wrap">
   <p class="eyebrow reveal">Get started</p>
   <h2 class="section-title reveal">Install, run, gate CI, wire into agents</h2>
-  <p class="section-lead reveal">The default build gives you Layer&nbsp;1, the deterministic, zero-false-positive core. It needs no models and is the recommended way to use Staleguard. Add the <code style="font-family:'JetBrains Mono',monospace;font-size:.85em;color:var(--blade)">ml</code> feature for the experimental Layers&nbsp;2 and 3.</p>
+  <p class="section-lead reveal">One small binary, no models to download.</p>
 
   <div class="tabs reveal">
     <button class="tab active" data-tab="t-install">Install</button>
-    <button class="tab" data-tab="t-ml">Layers 2 and 3 (experimental ML)</button>
     <button class="tab" data-tab="t-ci">CI gate</button>
     <button class="tab" data-tab="t-agent">Agents / MCP</button>
   </div>
 
   <div class="panel active" id="t-install">
-    <p class="lead">Homebrew, an install script, or from source. Each one gives you the deterministic core. Then run <code>check</code> on the full repo.</p>
+    <p class="lead">Homebrew, an install script, or from source. Then run <code>check</code> on the full repo.</p>
     <div class="code-block">
       <div class="bar"><div class="lights"><i></i><i></i><i></i></div><span class="title">shell</span><button class="copy-btn" data-copy="brew install Arthur920/tap/staleguard
 staleguard check">COPY</button></div>
@@ -720,24 +674,7 @@ staleguard check">COPY</button></div>
 <span class="cm"># or from source</span>
 <span class="sigil">$ </span><span class="cmd">cargo install</span> <span class="flag">--git</span> https://github.com/Arthur920/Staleguard
 
-<span class="sigil">$ </span><span class="cmd">staleguard check</span>                 <span class="cm"># full repo, Layer 1</span></pre>
-    </div>
-  </div>
-
-  <div class="panel" id="t-ml">
-    <p class="lead">Experimental and advisory. Layers 2 and 3 run local ONNX models behind the <code>ml</code> feature (prebuilt binaries omit it because the deps are large). Both routes compile from source, then fetch models at runtime.</p>
-    <div class="code-block">
-      <div class="bar"><div class="lights"><i></i><i></i><i></i></div><span class="title">shell</span><button class="copy-btn" data-copy="brew install Arthur920/tap/staleguard-ml
-staleguard setup
-staleguard check --layer 3">COPY</button></div>
-      <pre><span class="cm"># Homebrew: compiles with the ml feature</span>
-<span class="sigil">$ </span><span class="cmd">brew install</span> Arthur920/tap/staleguard-ml
-
-<span class="cm"># or with cargo</span>
-<span class="sigil">$ </span><span class="cmd">cargo install</span> <span class="flag">--git</span> https://github.com/Arthur920/Staleguard <span class="flag">--features</span> ml
-
-<span class="sigil">$ </span><span class="cmd">staleguard setup</span>                 <span class="cm"># fetch + load every model, offline thereafter</span>
-<span class="sigil">$ </span><span class="cmd">staleguard check</span> <span class="flag">--layer</span> 3       <span class="cm"># all three layers</span></pre>
+<span class="sigil">$ </span><span class="cmd">staleguard check</span>                 <span class="cm"># full repo</span></pre>
     </div>
   </div>
 
@@ -767,18 +704,6 @@ staleguard check --fail-on-regression --format json">COPY</button></div>
     </div>
   </div>
 
-  <h3 style="font-family:'Cinzel',serif;font-size:1.3rem;font-weight:600;margin-top:64px;letter-spacing:.03em" class="reveal">Environment overrides</h3>
-  <table class="env-table reveal">
-    <thead><tr><th>Variable</th><th>Effect</th></tr></thead>
-    <tbody>
-      <tr><td>STALEGUARD_NLI_REPO</td><td>NLI judge model repo (default <code style="color:var(--blade);font-family:'JetBrains Mono',monospace;font-size:.85em">Arthur920/staleguard</code>)</td></tr>
-      <tr><td>STALEGUARD_NLI_THRESHOLD<br>STALEGUARD_NLI_MARGIN</td><td>decision thresholds: how far contradiction must out-score entailment</td></tr>
-      <tr><td>STALEGUARD_NLI_MAX_CLAIMS</td><td>per-run claim budget (default 300; <code style="color:var(--blade);font-family:'JetBrains Mono',monospace;font-size:.85em">0</code> = no cap)</td></tr>
-      <tr><td>STALEGUARD_EMBED_REPO</td><td>Layer 2 embedding model</td></tr>
-      <tr><td>STALEGUARD_RERANK_REPO</td><td>optional reranker</td></tr>
-      <tr><td>STALEGUARD_ORT_THREADS</td><td>ONNX intra-op threads (default: all cores)</td></tr>
-    </tbody>
-  </table>
 </section>
 
 <footer>
@@ -789,12 +714,11 @@ staleguard check --fail-on-regression --format json">COPY</button></div>
           <img src="staleguard.png" alt="Staleguard shield">
           <span>Staleguard</span>
         </div>
-        <p class="footer-note">A heavily AI-assisted personal project. The architecture, layer design, and evaluation are mine, and so is the decision on what was good enough to keep. The deterministic core is built to be auditable because generated code shouldn't be taken on faith.</p>
+        <p class="footer-note">A heavily AI-assisted personal project. The architecture, design, and evaluation are mine, and so is the decision on what was good enough to keep. The deterministic core is built to be auditable because generated code shouldn't be taken on faith.</p>
       </div>
       <div class="footer-links">
         <a href="https://github.com/Arthur920/Staleguard" target="_blank" rel="noopener">GitHub ↗</a>
         <a href="https://github.com/Arthur920/Staleguard/blob/main/DETAILS.md" target="_blank" rel="noopener">Full details ↗</a>
-        <a href="https://huggingface.co/Arthur920/staleguard" target="_blank" rel="noopener">Model on Hugging Face ↗</a>
         <a href="https://github.com/Arthur920/Staleguard/releases" target="_blank" rel="noopener">Releases ↗</a>
       </div>
     </div>

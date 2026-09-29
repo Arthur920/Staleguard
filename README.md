@@ -16,7 +16,7 @@ Staleguard catches **documentation drift**: places where your READMEs, `CLAUDE.m
 and `*.md` docs claim something the code no longer backs up. It checks docs
 against the actual codebase and reports what's stale, wrong, or missing.
 
-Everything runs locally and offline. The core is **deterministic** (no model, no API) and
+Everything runs locally and offline. It is **deterministic** (no model, no API) and
 tuned for **zero false positives**. Every finding points at a concrete path,
 command, symbol, or import edge that the docs got wrong.
 
@@ -31,31 +31,11 @@ surface, and stale diagrams. A CI alignment score tracks drift over time.
 
 ## How it works
 
-The deterministic core (**Layer 1**) is the tool. It checks paths, commands,
-config keys, and entry points against the real codebase, compares architecture
+Staleguard checks paths, commands, config keys, env vars, flags, and code
+symbols named in your docs against the real codebase, compares architecture
 rules parsed from prose with the actual import graph, and reports only what it
-can prove wrong. It needs no models and runs in ~1.2s on a 330k-line repo. Every
-install ships with it by default.
-
-```
- Layer 1 — DETERMINISTIC  (no ML, zero false positives)
-   paths exist? commands real? config keys present? architecture rules hold?
-```
-
-### Experimental ML layers (opt-in)
-
-Behind the `ml` build feature sit two local-ONNX layers that try to catch
-*behavioral* drift the deterministic core can't see, such as prose like "the cache
-invalidates on write".
-
-```
- Layer 2 — RETRIEVAL  (local embeddings)        for each claim, fetch relevant code
- Layer 3 — VERIFICATION  (NLI cross-encoder)    (evidence, claim) → supported | contradicted | unverifiable
-```
-
-These layers are **experimental and advisory**. Treat a `contradicted` verdict as a
-high-precision hint to go look, not as a gate. For a dependable check, use
-Layer 1 alone. The method and measured numbers are in [DETAILS.md](DETAILS.md#status).
+can prove wrong. It is fully deterministic (no models, no network) and runs in
+~1.2s on a 330k-line repo.
 
 ## Install
 
@@ -76,44 +56,11 @@ cargo install --git https://github.com/Arthur920/Staleguard
 versions prompt to trust third-party taps; run `brew trust arthur920/tap` if
 asked.)
 
-All of these give you **Layer 1**, the deterministic, zero-false-positive core,
-which needs no models. Then run:
+Then run:
 
 ```bash
-staleguard check                 # full repo (Layer 1)
+staleguard check                 # full repo
 ```
-
-### Experimental ML layers (Layers 2 and 3)
-
-Layers 2 and 3 are opt-in and advisory (see [the eval](DETAILS.md#status) before you
-rely on them). They run local ONNX models and need the `ml` feature, which the
-prebuilt binaries omit (the ONNX + embedding deps are large). There are two ways to get an
-ml-enabled build. Both compile from source and then fetch models at runtime:
-
-```bash
-# Homebrew (compiles with the ml feature; conflicts with the plain `staleguard`)
-brew install Arthur920/tap/staleguard-ml
-
-# or with cargo
-cargo install --git https://github.com/Arthur920/Staleguard --features ml
-```
-
-Then:
-
-```bash
-staleguard setup                 # fetch + load every model, offline thereafter
-staleguard check --layer 3       # all three layers
-```
-
-`staleguard setup` prepares all layers and reports any model download error up
-front. The model files are always downloaded at runtime; there is no separate
-"install the models" step.
-
-The Layer 3 judge is the
-[`staleguard`](https://huggingface.co/Arthur920/staleguard)
-model on Hugging Face (a `microsoft/unixcoder-base` fine-tune); it downloads on
-`setup` / first run. Override any model or threshold with `STALEGUARD_*` env vars
-(see [DETAILS.md](DETAILS.md#environment-overrides)).
 
 ## CI integration
 
@@ -170,9 +117,6 @@ Action inputs: `args`, `format` (`text`/`json`/`sarif`), `version`, and
     brew install Arthur920/tap/staleguard   # or: cargo install --git https://github.com/Arthur920/Staleguard
     staleguard check --fail-on-regression --format sarif > staleguard.sarif
 ```
-
-For behavioral checks in CI, build `--features ml` and run `staleguard setup` (cache
-the model download between runs).
 
 ### Pre-commit hook
 
@@ -243,8 +187,6 @@ findings back as fixes.
 ```bash
 cargo build                          # debug binary at target/debug/staleguard
 cargo test                           # unit tests
-cargo build --features ml            # with Layers 2-3
-cargo run --features ml -- check --layer 3
 ```
 
 ---

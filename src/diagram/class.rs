@@ -20,7 +20,6 @@ use std::sync::OnceLock;
 
 use regex::Regex;
 
-use super::Format;
 use crate::claim::Provenance;
 use crate::code::symbol::{Symbol, SymbolKind};
 use crate::code::CodeIndex;
@@ -38,33 +37,22 @@ struct ClassDiagram {
     origin: String,
 }
 
-/// Class-diagram findings for one embedded diagram, or empty if `body` isn't a
-/// class diagram in `format`.
-pub(super) fn check(format: Format, body: &str, origin: &str, index: &CodeIndex) -> Vec<Finding> {
-    let Some(d) = parse(format, body, origin) else {
+/// Class-diagram findings for one embedded mermaid block, or empty if `body`
+/// isn't a `classDiagram`.
+pub(super) fn check(body: &str, origin: &str, index: &CodeIndex) -> Vec<Finding> {
+    let Some(d) = parse(body, origin) else {
         return Vec::new();
     };
     diff(&d, index)
 }
 
-fn parse(format: Format, body: &str, origin: &str) -> Option<ClassDiagram> {
-    match format {
-        Format::Mermaid => {
-            let header = body
-                .lines()
-                .map(str::trim)
-                .find(|l| !l.is_empty() && !l.starts_with("%%"))?;
-            if header.split_whitespace().next() != Some("classDiagram") {
-                return None;
-            }
-        }
-        Format::PlantUml => {
-            // A class diagram declares `class X` (sequence/component don't).
-            if !body.lines().any(|l| class_open_re().is_match(l.trim())) {
-                return None;
-            }
-        }
-        Format::Dot => return None,
+fn parse(body: &str, origin: &str) -> Option<ClassDiagram> {
+    let header = body
+        .lines()
+        .map(str::trim)
+        .find(|l| !l.is_empty() && !l.starts_with("%%"))?;
+    if header.split_whitespace().next() != Some("classDiagram") {
+        return None;
     }
     parse_body(body, origin)
 }
@@ -262,7 +250,7 @@ mod tests {
     #[test]
     fn grounded_class_and_method_are_supported() {
         let body = "classDiagram\n  class Account {\n    +balance()\n    +deposit()\n  }\n";
-        let out = check(Format::Mermaid, body, "d.md:1", &index());
+        let out = check(body, "d.md:1", &index());
         assert!(out.iter().all(|f| f.verdict == Verdict::Supported));
         assert_eq!(out.len(), 3); // class + 2 methods
     }
@@ -270,7 +258,7 @@ mod tests {
     #[test]
     fn drawn_method_absent_from_module_is_stale() {
         let body = "classDiagram\n  class Account {\n    +balance()\n    +withdraw()\n  }\n";
-        let out = check(Format::Mermaid, body, "d.md:1", &index());
+        let out = check(body, "d.md:1", &index());
         assert!(out
             .iter()
             .any(|f| f.verdict == Verdict::Stale && f.detail.contains("withdraw")));
@@ -282,7 +270,7 @@ mod tests {
     #[test]
     fn external_bare_class_is_not_flagged() {
         let body = "classDiagram\n  class HashMap\n  class Account\n  HashMap <|-- Account\n";
-        let out = check(Format::Mermaid, body, "d.md:1", &index());
+        let out = check(body, "d.md:1", &index());
         // HashMap grounds to nothing -> skipped (no Stale); Account grounds -> one Supported.
         assert!(out.iter().all(|f| f.verdict == Verdict::Supported));
         assert_eq!(out.len(), 1);
@@ -292,7 +280,7 @@ mod tests {
     #[test]
     fn inline_member_syntax_is_parsed() {
         let body = "classDiagram\n  Account : +deposit()\n";
-        let out = check(Format::Mermaid, body, "d.md:1", &index());
+        let out = check(body, "d.md:1", &index());
         assert!(out.iter().any(|f| f.claim.contains("deposit")));
     }
 }

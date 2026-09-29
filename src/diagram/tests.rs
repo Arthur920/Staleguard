@@ -34,29 +34,42 @@ fn phantom_edge_is_contradicted() {
         &["src/api", "src/domain", "src/db"],
     );
     let md = mermaid("graph TD\n  api[src/api] --> db[src/db]");
-    let f = check(
-        &md,
-        "doc.md",
-        &index,
-        &index.module_set(),
-        std::path::Path::new("."),
-    );
+    let f = check(&md, "doc.md", &index, &index.module_set());
     assert_eq!(f.len(), 1, "{f:?}");
     assert_eq!(f[0].verdict, Verdict::Contradicted);
     assert_eq!(f[0].code_refs, vec!["src/api -> src/db"]);
 }
 
 #[test]
+fn deprecated_edge_label_suppresses_phantom() {
+    // The drawn edge has no real import, but its label says it's history —
+    // no phantom finding.
+    let index = idx(
+        &[("src/api", "src/domain")],
+        &["src/api", "src/domain", "src/db"],
+    );
+    for md in [
+        mermaid("graph TD\n  api[src/api] -->|deprecated| db[src/db]"),
+        mermaid("graph TD\n  api[src/api] -->|TODO: remove| db[src/db]"),
+    ] {
+        let f = check(&md, "doc.md", &index, &index.module_set());
+        assert!(
+            f.iter().all(|x| x.verdict != Verdict::Contradicted),
+            "labeled non-real edge must not be phantom: {md}\n{f:?}"
+        );
+    }
+    // A neutral label still asserts a live dependency.
+    let md = mermaid("graph TD\n  api[src/api] -->|reads| db[src/db]");
+    let f = check(&md, "doc.md", &index, &index.module_set());
+    assert_eq!(f.len(), 1, "{f:?}");
+    assert_eq!(f[0].verdict, Verdict::Contradicted);
+}
+
+#[test]
 fn drawn_real_edge_is_clean() {
     let index = idx(&[("src/api", "src/domain")], &["src/api", "src/domain"]);
     let md = mermaid("graph TD\n  api[src/api] --> domain[src/domain]");
-    let f = check(
-        &md,
-        "doc.md",
-        &index,
-        &index.module_set(),
-        std::path::Path::new("."),
-    );
+    let f = check(&md, "doc.md", &index, &index.module_set());
     assert!(f.iter().all(|x| !x.verdict.is_reportable()), "{f:?}");
 }
 
@@ -67,22 +80,9 @@ fn ungrounded_endpoint_is_skipped() {
     // has no path separator so it is not a stale box either.
     let md = mermaid("graph TD\n  User --> api[src/api]");
     assert!(
-        check(
-            &md,
-            "doc.md",
-            &index,
-            &index.module_set(),
-            std::path::Path::new(".")
-        )
-        .is_empty(),
+        check(&md, "doc.md", &index, &index.module_set()).is_empty(),
         "{:?}",
-        check(
-            &md,
-            "doc.md",
-            &index,
-            &index.module_set(),
-            std::path::Path::new(".")
-        )
+        check(&md, "doc.md", &index, &index.module_set())
     );
 }
 
@@ -91,13 +91,7 @@ fn undirected_edge_matches_either_direction() {
     let index = idx(&[("src/api", "src/domain")], &["src/api", "src/domain"]);
     // Drawn undirected; real import runs api->domain. Should be clean.
     let md = mermaid("graph TD\n  domain[src/domain] --- api[src/api]");
-    let f = check(
-        &md,
-        "doc.md",
-        &index,
-        &index.module_set(),
-        std::path::Path::new("."),
-    );
+    let f = check(&md, "doc.md", &index, &index.module_set());
     assert!(f.iter().all(|x| !x.verdict.is_reportable()), "{f:?}");
 }
 
@@ -106,13 +100,7 @@ fn stale_box_with_path_label_is_stale() {
     let index = idx(&[("src/api", "src/domain")], &["src/api", "src/domain"]);
     // `src/legacy` resolves to no module; the `/` marks it as module-intent.
     let md = mermaid("graph TD\n  api[src/api] --> legacy[src/legacy]");
-    let f = check(
-        &md,
-        "doc.md",
-        &index,
-        &index.module_set(),
-        std::path::Path::new("."),
-    );
+    let f = check(&md, "doc.md", &index, &index.module_set());
     // api->legacy is skipped (legacy ungrounded); the box itself is stale.
     assert_eq!(f.len(), 1, "{f:?}");
     assert_eq!(f[0].verdict, Verdict::Stale);
@@ -124,13 +112,7 @@ fn missing_arrow_between_drawn_boxes_is_undocumented() {
     let index = idx(&[("src/api", "src/domain")], &["src/api", "src/domain"]);
     // Both boxes drawn, but the real api->domain import is not drawn.
     let md = mermaid("graph TD\n  api[src/api]\n  domain[src/domain]");
-    let f = check(
-        &md,
-        "doc.md",
-        &index,
-        &index.module_set(),
-        std::path::Path::new("."),
-    );
+    let f = check(&md, "doc.md", &index, &index.module_set());
     assert_eq!(f.len(), 1, "{f:?}");
     assert_eq!(f[0].verdict, Verdict::Undocumented);
     assert_eq!(f[0].code_refs, vec!["src/api -> src/domain"]);
@@ -142,14 +124,7 @@ fn omitted_module_does_not_trigger_missing_arrow() {
     let index = idx(&[("src/api", "src/domain")], &["src/api", "src/domain"]);
     let md = mermaid("graph TD\n  api[src/api] --> other\n");
     // api->other is phantom only if `other` grounds; it doesn't, so skipped.
-    assert!(check(
-        &md,
-        "doc.md",
-        &index,
-        &index.module_set(),
-        std::path::Path::new(".")
-    )
-    .is_empty());
+    assert!(check(&md, "doc.md", &index, &index.module_set()).is_empty());
 }
 
 // ---- label grounding: regressions from the 10-repo wild audit -------------
@@ -160,13 +135,7 @@ fn box_label_with_source_extension_grounds() {
     // extension-stripped as `pipeline/runner`, so the box must NOT read stale.
     let index = idx(&[], &["src/commands/wizard/pipeline/runner"]);
     let md = mermaid("graph TD\n  d[pipeline/runner.ts]");
-    let f = check(
-        &md,
-        "doc.md",
-        &index,
-        &index.module_set(),
-        std::path::Path::new("."),
-    );
+    let f = check(&md, "doc.md", &index, &index.module_set());
     assert!(f.iter().all(|x| !x.verdict.is_reportable()), "{f:?}");
 }
 
@@ -176,22 +145,9 @@ fn url_route_box_is_not_a_stale_module() {
     let index = idx(&[], &["src/api"]);
     let md = mermaid("graph TD\n  a[/items/public/] --> b[/users/{user_id}]");
     assert!(
-        check(
-            &md,
-            "doc.md",
-            &index,
-            &index.module_set(),
-            std::path::Path::new(".")
-        )
-        .is_empty(),
+        check(&md, "doc.md", &index, &index.module_set()).is_empty(),
         "{:?}",
-        check(
-            &md,
-            "doc.md",
-            &index,
-            &index.module_set(),
-            std::path::Path::new(".")
-        )
+        check(&md, "doc.md", &index, &index.module_set())
     );
 }
 
@@ -201,22 +157,9 @@ fn decision_node_label_is_not_a_stale_module() {
     let index = idx(&[], &["src/api"]);
     let md = mermaid("graph TD\n  a[full_tests_needed=False<br/>is_canary_run=True]");
     assert!(
-        check(
-            &md,
-            "doc.md",
-            &index,
-            &index.module_set(),
-            std::path::Path::new(".")
-        )
-        .is_empty(),
+        check(&md, "doc.md", &index, &index.module_set()).is_empty(),
         "{:?}",
-        check(
-            &md,
-            "doc.md",
-            &index,
-            &index.module_set(),
-            std::path::Path::new(".")
-        )
+        check(&md, "doc.md", &index, &index.module_set())
     );
 }
 
@@ -225,13 +168,7 @@ fn phantom_edge_grounds_through_extension() {
     // Both endpoints drawn with `.ts`; the import is real → clean, not phantom.
     let index = idx(&[("src/a", "src/b")], &["src/a", "src/b"]);
     let md = mermaid("graph TD\n  x[src/a.ts] --> y[src/b.ts]");
-    let f = check(
-        &md,
-        "doc.md",
-        &index,
-        &index.module_set(),
-        std::path::Path::new("."),
-    );
+    let f = check(&md, "doc.md", &index, &index.module_set());
     assert!(f.iter().all(|x| !x.verdict.is_reportable()), "{f:?}");
 }
 
@@ -245,13 +182,7 @@ fn fuzzy_box_is_not_stale() {
     // *safe* direction (fewer stale findings), never invent edges.
     let index = idx(&[], &["src/auth"]);
     let md = mermaid("graph TD\n  p[services/auth]");
-    let f = check(
-        &md,
-        "doc.md",
-        &index,
-        &index.module_set(),
-        std::path::Path::new("."),
-    );
+    let f = check(&md, "doc.md", &index, &index.module_set());
     assert!(f.iter().all(|x| !x.verdict.is_reportable()), "{f:?}");
 }
 
@@ -263,22 +194,9 @@ fn conceptual_box_does_not_drive_a_phantom() {
     let index = idx(&[], &["src/auth", "src/web"]);
     let md = mermaid("graph TD\n  a[Auth Service] --> w[Web Module]");
     assert!(
-        check(
-            &md,
-            "doc.md",
-            &index,
-            &index.module_set(),
-            std::path::Path::new(".")
-        )
-        .is_empty(),
+        check(&md, "doc.md", &index, &index.module_set()).is_empty(),
         "{:?}",
-        check(
-            &md,
-            "doc.md",
-            &index,
-            &index.module_set(),
-            std::path::Path::new(".")
-        )
+        check(&md, "doc.md", &index, &index.module_set())
     );
 }
 
@@ -297,22 +215,9 @@ fn ambiguous_segment_label_does_not_cascade() {
     );
     let md = mermaid("graph TD\n  a[auth] --> b[other]");
     assert!(
-        check(
-            &md,
-            "doc.md",
-            &index,
-            &index.module_set(),
-            std::path::Path::new(".")
-        )
-        .is_empty(),
+        check(&md, "doc.md", &index, &index.module_set()).is_empty(),
         "{:?}",
-        check(
-            &md,
-            "doc.md",
-            &index,
-            &index.module_set(),
-            std::path::Path::new(".")
-        )
+        check(&md, "doc.md", &index, &index.module_set())
     );
 }
 
@@ -322,13 +227,7 @@ fn missing_arrow_is_exact_unique_only() {
     // must NOT fire, since abstract diagrams omit edges on purpose.
     let index = idx(&[("src/auth", "src/billing")], &["src/auth", "src/billing"]);
     let md = mermaid("graph TD\n  a[Auth Service]\n  b[Billing System]");
-    let f = check(
-        &md,
-        "doc.md",
-        &index,
-        &index.module_set(),
-        std::path::Path::new("."),
-    );
+    let f = check(&md, "doc.md", &index, &index.module_set());
     assert!(
         f.iter().all(|x| x.verdict != Verdict::Undocumented),
         "fuzzy boxes must not trigger missing-arrow: {f:?}"
@@ -342,22 +241,9 @@ fn lone_generic_token_does_not_fuzzy_ground() {
     let index = idx(&[], &["src/database"]);
     let md = mermaid("graph TD\n  d[DB]");
     assert!(
-        check(
-            &md,
-            "doc.md",
-            &index,
-            &index.module_set(),
-            std::path::Path::new(".")
-        )
-        .is_empty(),
+        check(&md, "doc.md", &index, &index.module_set()).is_empty(),
         "{:?}",
-        check(
-            &md,
-            "doc.md",
-            &index,
-            &index.module_set(),
-            std::path::Path::new(".")
-        )
+        check(&md, "doc.md", &index, &index.module_set())
     );
 }
 
@@ -366,7 +252,6 @@ fn lone_generic_token_does_not_fuzzy_ground() {
 #[test]
 fn mermaid_parses_nodes_and_edges() {
     let d = mermaid::parse("graph LR\n  a[Auth] --> b[DB]\n  b --> c", "o").unwrap();
-    assert_eq!(d.kind, DiagramKind::Flowchart);
     assert_eq!(d.edges.len(), 2);
     assert!(d.edges.iter().all(|e| e.directed));
     assert_eq!(d.text("a"), "Auth");
@@ -385,48 +270,11 @@ fn mermaid_undirected_edge() {
 }
 
 #[test]
-fn plantuml_parses_components() {
-    let d = plantuml::parse("@startuml\n[Auth] --> [DB]\n@enduml", "o").unwrap();
-    assert_eq!(d.edges.len(), 1);
-    assert_eq!(d.text(&d.edges[0].from), "Auth");
-}
-
-#[test]
-fn plantuml_skips_sequence() {
-    assert!(plantuml::parse("@startuml\nAlice -> Bob : hello\n@enduml", "o").is_none());
-}
-
-#[test]
-fn dot_digraph_is_directed() {
-    let d = dot::parse("digraph G {\n  \"a\" -> \"b\";\n}", "o").unwrap();
-    assert_eq!(d.edges.len(), 1);
-    assert!(d.edges[0].directed);
-    assert_eq!(d.edges[0].from, "a");
-}
-
-#[test]
-fn dot_graph_is_undirected() {
-    let d = dot::parse("graph G {\n  a -- b;\n}", "o").unwrap();
-    assert_eq!(d.edges.len(), 1);
-    assert!(!d.edges[0].directed);
-}
-
-#[test]
-fn dot_node_label() {
-    let d = dot::parse("digraph { a [label=\"Auth\"]; a -> b; }", "o").unwrap();
-    assert_eq!(d.text("a"), "Auth");
-}
-
-// ---- source extraction ----------------------------------------------------
-
-#[test]
-fn sources_extracts_each_format() {
-    let md = "intro\n```mermaid\ngraph TD\n a-->b\n```\ntext\n```dot\ndigraph{a->b}\n```\n@startuml\n[A]-->[B]\n@enduml\n";
+fn sources_extracts_only_mermaid() {
+    let md = "intro\n```mermaid\ngraph TD\n a-->b\n```\ntext\n```dot\ndigraph{a->b}\n```\n";
     let got = sources(md);
-    assert_eq!(got.len(), 3);
-    assert_eq!(got[0].format, Format::Mermaid);
-    assert_eq!(got[1].format, Format::Dot);
-    assert_eq!(got[2].format, Format::PlantUml);
+    assert_eq!(got.len(), 1);
+    assert_eq!(got[0].line, 2);
 }
 
 #[test]
@@ -436,11 +284,11 @@ fn sources_ignores_non_diagram_fence() {
 }
 
 /// End-to-end dogfood: build a *real* index via tree-sitter from temp source,
-/// then run class + sequence diagrams through the full `check` dispatch. Proves
+/// then run a class diagram through the full `check` dispatch. Proves
 /// `Symbol.calls`/`members` populate and grounding works on real extraction
 /// (the per-module tests use synthetic indexes).
 #[test]
-fn class_and_sequence_ground_against_a_real_index() {
+fn class_diagram_grounds_against_a_real_index() {
     use std::fs;
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -470,7 +318,7 @@ fn class_and_sequence_ground_against_a_real_index() {
 
     // Class diagram: `validate` is real, `purge` is not.
     let class = mermaid("classDiagram\n  class Service {\n    +validate()\n    +purge()\n  }");
-    let cf = check(&class, "doc.md", &index, &index.module_set(), &dir);
+    let cf = check(&class, "doc.md", &index, &index.module_set());
     assert!(
         cf.iter()
             .any(|f| f.verdict == Verdict::Supported && f.claim.contains("validate")),
@@ -481,12 +329,6 @@ fn class_and_sequence_ground_against_a_real_index() {
             .any(|f| f.verdict == Verdict::Stale && f.detail.contains("purge")),
         "{cf:?}"
     );
-
-    // Sequence diagram: `handle` calls step_one then step_two, in order.
-    let seq = mermaid("sequenceDiagram\n  H->>S: step_one()\n  H->>S: step_two()");
-    let sf = check(&seq, "doc.md", &index, &index.module_set(), &dir);
-    assert!(!sf.is_empty(), "sequence should ground to `handle`");
-    assert!(sf.iter().all(|f| f.verdict == Verdict::Supported), "{sf:?}");
 
     let _ = fs::remove_dir_all(&dir);
 }

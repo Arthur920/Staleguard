@@ -21,7 +21,7 @@ use std::collections::HashSet;
 use std::path::Path;
 
 pub use audit::{audit, AuditRow, RuleStatus};
-pub use extract::{extract_bare_rules, extract_prose_rules};
+pub use extract::extract_prose_rules;
 pub use verify::check;
 
 #[allow(unused_imports)]
@@ -310,96 +310,6 @@ mod tests {
         assert_eq!(rows[0].status, RuleStatus::Ungrounded("ghost".into()));
     }
 
-    fn mods(items: &[&str]) -> HashSet<String> {
-        items.iter().map(|s| s.to_string()).collect()
-    }
-
-    #[test]
-    fn bare_extracts_grounded_dependency_rules() {
-        let m = mods(&["src/handlers/h", "src/store/db", "src/util/u"]);
-        // un-backticked operands, the dominant real-world phrasing.
-        let r = extract_bare_rules(
-            "The handlers module must not depend on the store module.",
-            "ARCH.md",
-            &m,
-        );
-        assert_eq!(
-            r[0].rule,
-            Rule::ForbidEdge {
-                from: "handlers".into(),
-                to: "store".into()
-            }
-        );
-        assert!(r[0].origin.ends_with("[bare]"));
-    }
-
-    #[test]
-    fn bare_handles_bold_and_cannot() {
-        let m = mods(&["src/service/s", "src/util/u"]);
-        // **bold** operands + "cannot <verb>" (no following "not").
-        let r = extract_bare_rules(
-            "The **service** module cannot import **util**.",
-            "ARCH.md",
-            &m,
-        );
-        assert_eq!(
-            r[0].rule,
-            Rule::ForbidEdge {
-                from: "service".into(),
-                to: "util".into()
-            }
-        );
-    }
-
-    #[test]
-    fn bare_extracts_transitive_reach() {
-        let m = mods(&["src/handlers/h", "src/store/db"]);
-        let r = extract_bare_rules(
-            "The handlers layer must not transitively reach store.",
-            "ARCH.md",
-            &m,
-        );
-        assert_eq!(
-            r[0].rule,
-            Rule::ForbidReach {
-                from: "handlers".into(),
-                to: "store".into()
-            }
-        );
-    }
-
-    #[test]
-    fn bare_suppresses_solid_and_ungrounded_noise() {
-        let m = mods(&["src/handlers/h", "src/store/db"]);
-        // SOLID boilerplate (stopwords), and operands matching no module.
-        for noise in [
-            "High-level modules should not depend on low-level modules.",
-            "Clients should not be forced to depend on interfaces they do not use.",
-            "The frobnicator must not depend on the wizbang.",
-            "Abstractions should not depend on details.",
-        ] {
-            assert!(
-                extract_bare_rules(noise, "ARCH.md", &m).is_empty(),
-                "should not fire on: {noise:?}"
-            );
-        }
-    }
-
-    #[test]
-    fn bare_preserves_real_module_case() {
-        // Java-style CamelCase module segment: operand canonicalises to the real
-        // segment so `matches` (case-sensitive) still finds it downstream.
-        let m = mods(&["api/Handler", "store/Db"]);
-        let r = extract_bare_rules("The Handler module must not depend on Db.", "ARCH.md", &m);
-        assert_eq!(
-            r[0].rule,
-            Rule::ForbidEdge {
-                from: "Handler".into(),
-                to: "Db".into()
-            }
-        );
-    }
-
     #[test]
     fn audit_holds_when_grounded_and_clean() {
         let idx = index(vec![edge("src/api", "src/domain")]);
@@ -588,6 +498,61 @@ mod tests {
     }
 
     #[test]
+    fn prose_operand_lists_fan_out() {
+        let md = "`ui`, `cli` must not import `db` or `cache`.";
+        let kinds: Vec<Rule> = extract_prose_rules(md, "ARCH.md")
+            .into_iter()
+            .map(|s| s.rule)
+            .collect();
+        assert_eq!(kinds.len(), 4, "2x2 cross product, got {kinds:?}");
+        for (f, t) in [
+            ("ui", "db"),
+            ("ui", "cache"),
+            ("cli", "db"),
+            ("cli", "cache"),
+        ] {
+            assert!(kinds.contains(&Rule::ForbidEdge {
+                from: f.into(),
+                to: t.into()
+            }));
+        }
+    }
+
+    #[test]
+    fn prose_rule_wrapped_across_lines() {
+        // A soft line break inside a sentence must not hide the rule.
+        let md = "The `controllers` layer must not\nimport `db` directly.";
+        let rules = extract_prose_rules(md, "ARCH.md");
+        assert_eq!(
+            rules[0].rule,
+            Rule::ForbidEdge {
+                from: "controllers".into(),
+                to: "db".into()
+            }
+        );
+        assert_eq!(rules[0].origin, "ARCH.md:1");
+        // But a new block (bullet, heading, blank line) is never joined in.
+        let md = "Some text without punctuation\n- `a` must not import `b`\n";
+        assert_eq!(extract_prose_rules(md, "ARCH.md").len(), 1);
+        assert_eq!(extract_prose_rules(md, "ARCH.md")[0].origin, "ARCH.md:2");
+    }
+
+    #[test]
+    fn hedged_prose_is_not_a_rule() {
+        for md in [
+            "Previously, `api` must not import `db`.",
+            "If `api` must not import `db`, use the port instead.",
+            "For example, `api` must not import `db`.",
+            "`api` used to be forbidden: `api` must not import `db`.",
+        ] {
+            assert!(
+                extract_prose_rules(md, "ARCH.md").is_empty(),
+                "hedged prose fired: {md:?}"
+            );
+        }
+    }
+
+    #[test]
     fn clean_forbid_symbol_is_anchored_to_scanned_modules() {
         let dir = scratch_dir("clean-symbol");
         fs::write(dir.join("safe.rs"), "fn ok() {}\n").unwrap();
@@ -710,27 +675,14 @@ mod tests {
             let v: serde_json::Value = serde_json::from_str(raw)
                 .unwrap_or_else(|e| panic!("corpus line {lineno}: {e}\n{raw}"));
             let text = v["text"].as_str().unwrap();
-            let modules: HashSet<String> = v["modules"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .map(|m| m.as_str().unwrap().to_string())
-                .collect();
             let mut gold: HashSet<String> =
                 v["gold"].as_array().unwrap().iter().map(gold_key).collect();
             gold_total += gold.len();
 
-            // Mirror main.rs: prose rules first, then bare deduped against them.
-            let mut got: Vec<Rule> = extract_prose_rules(text, "doc.md")
+            let got: Vec<Rule> = extract_prose_rules(text, "doc.md")
                 .into_iter()
                 .map(|s| s.rule)
                 .collect();
-            let known: HashSet<String> = got.iter().map(rule_key).collect();
-            for s in extract_bare_rules(text, "doc.md", &modules) {
-                if !known.contains(&rule_key(&s.rule)) {
-                    got.push(s.rule);
-                }
-            }
 
             let got_keys: HashSet<String> = got.iter().map(rule_key).collect();
             for k in &got_keys {

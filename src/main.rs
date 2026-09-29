@@ -10,18 +10,10 @@ mod coverage;
 mod diagram;
 mod drift;
 mod entrypoints;
-#[cfg(feature = "ml")]
-mod evidence;
 mod extract;
 mod findings;
 mod git;
-#[cfg(feature = "ml")]
-mod judge;
 mod report;
-#[cfg(feature = "ml")]
-mod rerank;
-#[cfg(feature = "ml")]
-mod retrieve;
 mod rules;
 mod sarif;
 mod settings;
@@ -63,7 +55,6 @@ Examples:
   staleguard rules                  audit architecture rules parsed from doc prose
   staleguard coverage               public code surface no doc describes
 
-Layers 2-3 (retrieval + NLI judge) need the `ml` build; see `staleguard check --help`.
 Run `staleguard <command> --help` for per-command options.";
 
 #[derive(Subcommand)]
@@ -76,12 +67,6 @@ enum Commands {
         /// Output format.
         #[arg(long, value_enum, default_value_t = Format::Text)]
         format: Format,
-        /// Max layer: 1 deterministic (recommended), 2 +retrieval, 3 +NLI judge.
-        /// Layers 2-3 require the `ml` feature build. Layer 3 runs a code-aware NLI
-        /// cross-encoder (`staleguard`, a UniXcoder fine-tune) over
-        /// the retrieved code evidence to render supported/contradicted verdicts.
-        #[arg(long, default_value_t = 1)]
-        layer: u8,
         /// Drift base: only re-derive claims whose code changed since this git
         /// ref (default: the committed ledger's last commit).
         #[arg(long)]
@@ -104,7 +89,7 @@ enum Commands {
         /// Restrict doc-vs-code checks to these doc paths (repeatable; matched by
         /// exact relative path or path suffix). Skips the repo-wide coverage and
         /// history passes, so it is far cheaper, useful for checking a single
-        /// changed doc (and for keeping the Layer-3 judge to that doc's claims).
+        /// changed doc.
         #[arg(long = "doc")]
         docs: Vec<String>,
     },
@@ -136,22 +121,6 @@ enum Commands {
         /// Output format.
         #[arg(long, value_enum, default_value_t = Format::Text)]
         format: Format,
-    },
-    /// Prepare all layers: fetch the Layer 2/3 models so later runs are offline.
-    /// Layer 1 needs nothing; this download-and-load step is only meaningful in
-    /// the `ml` build, where it pulls the embedding model and the NLI judge.
-    Setup,
-    /// Semantic code search using local jina embeddings (requires `ml` feature).
-    #[cfg(feature = "ml")]
-    Retrieve {
-        /// Natural-language or code query.
-        query: String,
-        /// Repo root (default: cwd).
-        #[arg(default_value = ".")]
-        path: PathBuf,
-        /// Number of chunks to return.
-        #[arg(long, default_value_t = 5)]
-        k: usize,
     },
 }
 
@@ -232,16 +201,14 @@ pub(crate) fn is_changelog_doc(path: &Path) -> bool {
 fn run_check(
     root: &Path,
     opts: &drift::Options,
-    layer: u8,
     doc_filter: &[String],
     min_severity: Option<findings::Severity>,
 ) -> drift::Outcome {
-    let _ = layer; // consulted only in `ml` builds for the Layer 3 judge.
-                   // `--doc` scoping: restrict every doc-derived pass to the named docs and skip
-                   // the repo-wide coverage/history passes (which answer "what code is
-                   // undocumented", a whole-repo question that a single-doc check doesn't ask).
-                   // This is what makes a scoped run cheap: no 1000-commit history parse, no
-                   // coverage ranking, and the Layer-3 judge only sees the target doc's claims.
+    // `--doc` scoping: restrict every doc-derived pass to the named docs and skip
+    // the repo-wide coverage/history passes (which answer "what code is
+    // undocumented", a whole-repo question that a single-doc check doesn't ask).
+    // This is what makes a scoped run cheap: no 1000-commit history parse and no
+    // coverage ranking.
     let scoped = !doc_filter.is_empty();
     // Optional `.staleguard.toml`: doc-exclude globs + verdict suppression. A
     // malformed file aborts the run rather than silently dropping a check.
@@ -258,7 +225,7 @@ fn run_check(
     let code_tokens = config::code_tokens(root);
     let grounding = entrypoints::Grounding::from_index(&index);
     // One git-history fetch shared by every history-mining pass (coverage risk
-    // ranking + the coupling staleness prior). Skipped entirely when scoped.
+    // ranking). Skipped entirely when scoped.
     let history = if scoped {
         Vec::new()
     } else {
@@ -317,21 +284,6 @@ fn run_check(
     }
     findings.extend(rules::check(&arch_rules, &index, root));
 
-    // Standalone Graphviz files (`*.dot`/`*.gv`) live outside the markdown set.
-    // They are a whole-repo pass, so a `--doc`-scoped run skips them.
-    if !scoped {
-        for dot in diagram::collect_dot_files(root) {
-            if let Ok(text) = std::fs::read_to_string(&dot) {
-                let rel = dot
-                    .strip_prefix(root)
-                    .unwrap_or(&dot)
-                    .to_string_lossy()
-                    .to_string();
-                findings.extend(diagram::check_dot_file(&text, &rel, &index, &modules));
-            }
-        }
-    }
-
     // Code -> doc coverage gaps: undocumented public surface, anchored to its
     // symbol so it scores as its own dimension of the alignment score. This is a
     // whole-repo question, so a `--doc`-scoped run skips it.
@@ -339,48 +291,6 @@ fn run_check(
         findings.extend(coverage::gaps(&index, root, &history));
     }
 
-    // Layer 3: behavioural prose claims the deterministic layers can't reach.
-    // Layer 2 retrieves the evidence; the NLI judge renders the verdict. Gated
-    // behind the `ml` feature and `--layer 3`; a model/load failure degrades to
-    // the deterministic findings rather than aborting the run.
-    #[cfg(feature = "ml")]
-    if layer >= 3 {
-        eprintln!(
-            "note: layer 3 runs the code-aware NLI judge (staleguard); \
-             verdicts are advisory; review contradictions before acting."
-        );
-        let mut claims = Vec::new();
-        // Build the shared symbol lookup once; claim grounding reuses it per doc.
-        let lookup = crate::code::SymbolLookup::build(&index);
-        for doc in collect_docs_filtered(root, doc_filter) {
-            if let Ok(text) = std::fs::read_to_string(&doc) {
-                let rel = doc
-                    .strip_prefix(root)
-                    .unwrap_or(&doc)
-                    .to_string_lossy()
-                    .to_string();
-                if settings.is_doc_excluded(&rel) {
-                    continue;
-                }
-                claims.extend(judge::candidate_claims(&text, &rel, &lookup));
-            }
-        }
-        let cap = judge::max_claims();
-        if cap > 0 {
-            claims.truncate(cap);
-        }
-        match judge::check(root, &index, &claims, judge::EVIDENCE_K) {
-            Ok(mut judged) => findings.append(&mut judged),
-            Err(e) => eprintln!("note: layer 3 judge skipped ({e})"),
-        }
-    }
-
-    // Layer 0: git-history staleness prior, then the drift pipeline (lineage,
-    // carry-forward, fact-hash drift flag, alignment score). The staleness prior
-    // needs the (skipped) history, so it only runs on a full, unscoped check.
-    if !scoped {
-        findings.extend(drift::coupling::check(&history));
-    }
     // Verdict suppression from `.staleguard.toml` (e.g. opt out of `undocumented`).
     // Applied before the drift pipeline so suppressed findings neither report nor
     // gate. `Supported` claims are untouched, so the alignment score is unaffected.
@@ -398,57 +308,12 @@ fn run_check(
     drift::run(findings, &index, root, opts)
 }
 
-/// `staleguard setup`: ensure every layer is ready to run. Layer 1 is always
-/// available; in the `ml` build this fetches and loads the Layer 2 embedding
-/// model and the Layer 3 NLI judge so the first real `check --layer 3` is fully
-/// offline (and any model auth/network error surfaces here, not mid-run).
-fn run_setup() -> ExitCode {
-    println!("Layer 1 (deterministic): ready; no model needed.");
-
-    #[cfg(not(feature = "ml"))]
-    {
-        println!(
-            "Layers 2-3: this binary was built without the `ml` feature, so there \
-             are no models to fetch.\n\
-             Build with models enabled (the prebuilt/Homebrew binaries omit the \
-             heavy ONNX deps):\n  \
-             cargo install --git https://github.com/Arthur920/Staleguard --features ml"
-        );
-        ExitCode::SUCCESS
-    }
-
-    #[cfg(feature = "ml")]
-    {
-        print!("Layer 2 (embeddings): fetching model ... ");
-        use std::io::Write;
-        let _ = std::io::stdout().flush();
-        if let Err(e) = retrieve::prefetch_model() {
-            println!("failed");
-            eprintln!("error: {e}");
-            return ExitCode::FAILURE;
-        }
-        println!("ready.");
-
-        print!("Layer 3 (NLI judge): fetching model ... ");
-        let _ = std::io::stdout().flush();
-        if let Err(e) = judge::Judge::load() {
-            println!("failed");
-            eprintln!("error: {e}");
-            return ExitCode::FAILURE;
-        }
-        println!("ready.");
-        println!("All layers ready. Run `staleguard check --layer 3`.");
-        ExitCode::SUCCESS
-    }
-}
-
 fn main() -> ExitCode {
     let cli = Cli::parse();
     match cli.command {
         Commands::Check {
             path,
             format,
-            layer,
             diff,
             write_ledger,
             fail_on_regression,
@@ -456,20 +321,12 @@ fn main() -> ExitCode {
             docs,
         } => {
             let root = std::fs::canonicalize(&path).unwrap_or(path);
-            #[cfg(not(feature = "ml"))]
-            if layer > 1 {
-                eprintln!("note: layers 2-3 need the `ml` feature; running layer 1 only.");
-            }
-            #[cfg(feature = "ml")]
-            if layer == 2 {
-                eprintln!("note: layer 2 is retrieval-only (no verdicts); use --layer 3 for the NLI judge.");
-            }
             let opts = drift::Options {
                 diff_ref: diff,
                 write_ledger,
                 fail_on_regression,
             };
-            let out = run_check(&root, &opts, layer, &docs, min_severity);
+            let out = run_check(&root, &opts, &docs, min_severity);
             report::report_check(&out, format);
             // Fail on any reportable finding, or on a score regression in CI.
             if out.findings.is_empty() && out.regression.is_none() {
@@ -487,9 +344,7 @@ fn main() -> ExitCode {
         Commands::Rules { path, format } => {
             let root = std::fs::canonicalize(&path).unwrap_or(path);
             let index = CodeIndex::build(&root);
-            let modules = index.module_set();
             let mut sourced = Vec::new();
-            let mut bare = Vec::new();
             for doc in collect_docs(&root) {
                 if let Ok(text) = std::fs::read_to_string(&doc) {
                     let rel = doc
@@ -498,16 +353,8 @@ fn main() -> ExitCode {
                         .to_string_lossy()
                         .to_string();
                     sourced.extend(rules::extract_prose_rules(&text, &rel));
-                    bare.extend(rules::extract_bare_rules(&text, &rel, &modules));
                 }
             }
-            // Experimental bare-operand rules (audit-only): keep only those not
-            // already captured by the backticked path, so the report shows the
-            // *additional* recall the prototype would buy.
-            let known: std::collections::HashSet<_> =
-                sourced.iter().map(|s| s.rule.clone()).collect();
-            bare.retain(|s| !known.contains(&s.rule));
-            sourced.extend(bare);
             let rows = rules::audit(&sourced, &index, &root);
             report::report_rules(&rows, format);
             // A violated rule is real drift; exit non-zero so CI/agents notice.
@@ -528,24 +375,6 @@ fn main() -> ExitCode {
                 ExitCode::SUCCESS
             } else {
                 ExitCode::FAILURE
-            }
-        }
-        Commands::Setup => run_setup(),
-        #[cfg(feature = "ml")]
-        Commands::Retrieve { query, path, k } => {
-            let root = std::fs::canonicalize(&path).unwrap_or(path);
-            let index = CodeIndex::build(&root);
-            match retrieve::retrieve(&root, &index, std::slice::from_ref(&query), k) {
-                Ok(per_query) => {
-                    for hit in &per_query[0] {
-                        println!("{:.3}  {}:{}", hit.score, hit.path, hit.start_line);
-                    }
-                    ExitCode::SUCCESS
-                }
-                Err(e) => {
-                    eprintln!("error: {e}");
-                    ExitCode::FAILURE
-                }
             }
         }
     }

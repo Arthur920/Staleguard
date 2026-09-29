@@ -9,7 +9,7 @@
 //! append it to [`doc_checks`]", not "edit the orchestrator".
 //!
 //! Whole-repo passes (coverage, standalone diagrams, the architecture-rule graph
-//! check, the history/coupling prior) are *not* per-doc and stay in `main.rs`.
+//! check, the history-based coverage ranking) are *not* per-doc and stay in `main.rs`.
 
 use std::path::Path;
 
@@ -109,6 +109,6 @@ impl DocCheck for ConstSwapCheck {
 struct DiagramCheck;
 impl DocCheck for DiagramCheck {
     fn check(&self, doc: &Doc, ctx: &CheckContext) -> Vec<Finding> {
-        diagram::check(&doc.text, &doc.rel, ctx.index, ctx.modules, ctx.root)
+        diagram::check(&doc.text, &doc.rel, ctx.index, ctx.modules)
     }
 }

@@ -1,27 +1,18 @@
 //! Layer 1 diagram coherence: parse text-based architecture diagrams and
 //! set-diff their nodes/edges against the real module dependency graph.
 //!
-//! Scope (first cut) is graph-shaped diagrams only: Mermaid `graph`/`flowchart`,
-//! PlantUML component diagrams, and Graphviz DOT. Sequence/class/ER/state
-//! diagrams are recognized and skipped (they need symbol/call-graph alignment).
-//! No ML: every endpoint is grounded against
+//! Scope: Mermaid only. `graph`/`flowchart` diagrams are set-diffed against the
+//! import graph; `classDiagram`s are grounded against real symbols. Other kinds
+//! and formats (sequence/ER/state, PlantUML, DOT) were dropped: rare in real
+//! docs, and never produced a true finding in the wild audits. No ML: every endpoint is grounded against
 //! real modules with [`crate::rules::matches`] / [`crate::rules::grounded`] so we
 //! under-report rather than emit false positives.
 
-mod align;
 mod class;
-mod dot;
-mod er;
 mod ground;
 mod mermaid;
-mod plantuml;
-mod sequence;
-mod state;
 
 use std::collections::HashSet;
-use std::path::{Path, PathBuf};
-
-use walkdir::WalkDir;
 
 use crate::claim::Provenance;
 use crate::code::CodeIndex;
@@ -29,31 +20,6 @@ use crate::findings::{Finding, Verdict};
 use crate::rules::matches;
 
 use ground::{ground_label, module_token_index, resolve, Resolution};
-
-/// The shape of a parsed diagram. Only the graph-shaped kinds are diffable at
-/// Layer 1; the rest are parsed to `None` by their format parser and skipped.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DiagramKind {
-    Flowchart,
-    Component,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Format {
-    Mermaid,
-    PlantUml,
-    Dot,
-}
-
-impl Format {
-    fn label(self) -> &'static str {
-        match self {
-            Format::Mermaid => "mermaid",
-            Format::PlantUml => "plantuml",
-            Format::Dot => "dot",
-        }
-    }
-}
 
 /// A diagram box. `id` is the node key used by edges; `label` is the display
 /// text (falls back to `id` when a node is only referenced, never declared).
@@ -70,15 +36,29 @@ pub struct Edge {
     pub from: String,
     pub to: String,
     pub directed: bool,
+    /// False when the edge's label marks it as intentionally non-real
+    /// (`deprecated`, `TODO`, `planned`): it is still *drawn* (so it satisfies
+    /// the missing-arrow check) but asserts no live dependency, so it can't be
+    /// a phantom edge.
+    pub asserted: bool,
+}
+
+/// An edge label that flags the connection as intentionally not (or no longer)
+/// real — asserting nothing about the current import graph.
+pub(super) fn non_real_label(label: &str) -> bool {
+    let l = label.to_ascii_lowercase();
+    [
+        "deprecat", "todo", "planned", "removed", "future", "obsolete",
+    ]
+    .iter()
+    .any(|w| l.contains(w))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Diagram {
-    pub kind: DiagramKind,
-    pub format: Format,
     pub nodes: Vec<Node>,
     pub edges: Vec<Edge>,
-    /// `"rel/path.md:<block-start-line>"`, or a `.dot`/`.gv` file path.
+    /// `"rel/path.md:<block-start-line>"`.
     pub origin: String,
 }
 
@@ -93,34 +73,24 @@ impl Diagram {
     }
 }
 
-/// A fenced/embedded diagram source pulled from a markdown doc.
+/// A fenced mermaid block pulled from a markdown doc.
 struct Source {
-    format: Format,
     body: String,
     /// 1-based line where the block starts.
     line: usize,
 }
 
-/// Extract every diagram source embedded in a markdown document: fenced
-/// ```` ```mermaid|plantuml|dot ```` blocks plus bare `@startuml…@enduml`
-/// regions that sit outside any fence.
+/// Every ```` ```mermaid ```` block in a markdown document.
 fn sources(markdown: &str) -> Vec<Source> {
     let mut out = Vec::new();
-    // (format, start-line, body). A non-diagram fence is tracked with `None`
-    // format so a `@startuml` inside it isn't mistaken for a bare UML region;
-    // its body is discarded on close.
-    let mut fence: Option<(Option<Format>, usize, Vec<&str>)> = None;
-    let mut uml: Option<(usize, Vec<&str>)> = None;
-
+    // (is-mermaid, start-line, body) of the open fence, if any.
+    let mut fence: Option<(bool, usize, Vec<&str>)> = None;
     for (i, raw) in markdown.lines().enumerate() {
         let trimmed = raw.trim_start();
-
-        // Inside a fenced block: accumulate until the closing fence.
-        if let Some((fmt, start, body)) = fence.as_mut() {
+        if let Some((is_mermaid, start, body)) = fence.as_mut() {
             if trimmed.starts_with("```") {
-                if let Some(fmt) = fmt {
+                if *is_mermaid {
                     out.push(Source {
-                        format: *fmt,
                         body: body.join("\n"),
                         line: *start,
                     });
@@ -129,105 +99,30 @@ fn sources(markdown: &str) -> Vec<Source> {
             } else {
                 body.push(raw);
             }
-            continue;
-        }
-
-        // Opening fence?
-        if let Some(rest) = trimmed.strip_prefix("```") {
-            let fmt = match rest.trim().to_ascii_lowercase().as_str() {
-                "mermaid" => Some(Format::Mermaid),
-                "plantuml" | "puml" | "uml" => Some(Format::PlantUml),
-                "dot" | "graphviz" => Some(Format::Dot),
-                _ => None,
-            };
-            fence = Some((fmt, i + 1, Vec::new()));
-            continue;
-        }
-
-        // Bare PlantUML outside any fence.
-        if let Some((start, body)) = uml.as_mut() {
-            body.push(raw);
-            if trimmed.starts_with("@enduml") {
-                out.push(Source {
-                    format: Format::PlantUml,
-                    body: body.join("\n"),
-                    line: *start,
-                });
-                uml = None;
-            }
-            continue;
-        }
-        if trimmed.starts_with("@startuml") {
-            uml = Some((i + 1, vec![raw]));
+        } else if let Some(rest) = trimmed.strip_prefix("```") {
+            let is_mermaid = rest.trim().eq_ignore_ascii_case("mermaid");
+            fence = Some((is_mermaid, i + 1, Vec::new()));
         }
     }
     out
 }
 
-/// Diagram-coherence findings for one markdown document. `root` is the repo root
-/// (needed only to extract the SQL schema for ER diagrams).
+/// Diagram-coherence findings for one markdown document.
 pub fn check(
     markdown: &str,
     doc_path: &str,
     index: &CodeIndex,
     modules: &HashSet<String>,
-    root: &Path,
 ) -> Vec<Finding> {
     let mut out = Vec::new();
     for src in sources(markdown) {
         let origin = format!("{doc_path}:{}", src.line);
-        if let Some(d) = parse(src.format, &src.body, &origin) {
-            out.extend(diff(&d, index, modules));
-        } else if let Some(seq) = sequence::parse(src.format, &src.body, &origin) {
-            // Ordered diagrams are aligned, not set-diffed.
-            out.extend(align::check(&seq, index));
-        } else {
-            // Symbol/schema-grounded kinds. Each returns empty unless the body is
-            // its kind, so this stays a clean fall-through.
-            out.extend(class::check(src.format, &src.body, &origin, index));
-            out.extend(state::check(src.format, &src.body, &origin, index));
-            out.extend(er::check(src.format, &src.body, &origin, root));
+        match mermaid::parse(&src.body, &origin) {
+            Some(d) => out.extend(diff(&d, index, modules)),
+            None => out.extend(class::check(&src.body, &origin, index)),
         }
     }
     out
-}
-
-/// Standalone Graphviz files (`*.dot`, `*.gv`) anywhere under `root`.
-pub fn collect_dot_files(root: &Path) -> Vec<PathBuf> {
-    WalkDir::new(root)
-        .into_iter()
-        .filter_entry(|e| !crate::code::lang::is_skip_dir(&e.file_name().to_string_lossy()))
-        .filter_map(|e| e.ok())
-        .filter(|e| e.file_type().is_file())
-        .map(|e| e.into_path())
-        .filter(|p| {
-            matches!(
-                p.extension().and_then(|s| s.to_str()),
-                Some("dot") | Some("gv")
-            )
-        })
-        .collect()
-}
-
-/// Diagram-coherence findings for a standalone DOT file.
-pub fn check_dot_file(
-    body: &str,
-    origin: &str,
-    index: &CodeIndex,
-    modules: &HashSet<String>,
-) -> Vec<Finding> {
-    match parse(Format::Dot, body, origin) {
-        Some(d) => diff(&d, index, modules),
-        None => Vec::new(),
-    }
-}
-
-fn parse(format: Format, body: &str, origin: &str) -> Option<Diagram> {
-    match format {
-        Format::Mermaid => mermaid::parse(body, origin),
-        Format::PlantUml => plantuml::parse(body, origin),
-        Format::Dot => dot::parse(body, origin),
-    }
 }
 
 // ---- the set-diff ---------------------------------------------------------
@@ -260,6 +155,9 @@ fn diff(d: &Diagram, index: &CodeIndex, modules: &HashSet<String>) -> Vec<Findin
     //    grounded endpoint can't carry an assertion about a specific edge without
     //    risking false positives (the wild audit's conceptual/segment-match arrows).
     for e in &d.edges {
+        if !e.asserted {
+            continue; // labeled deprecated/planned — asserts no live dependency
+        }
         let from = d.text(&e.from);
         let to = d.text(&e.to);
         let (rfrom, rto) = (res(&from), res(&to));
@@ -282,7 +180,7 @@ fn diff(d: &Diagram, index: &CodeIndex, modules: &HashSet<String>) -> Vec<Findin
                     d.origin.clone(),
                     format!(
                         "Phantom dependency: the {} diagram draws an edge `{from}` -> `{to}`, but no import connects those modules.",
-                        d.format.label()
+                        "mermaid"
                     ),
                 )
                 .anchored(prov)
@@ -305,7 +203,7 @@ fn diff(d: &Diagram, index: &CodeIndex, modules: &HashSet<String>) -> Vec<Findin
                 d.origin.clone(),
                 format!(
                     "Stale box: the {} diagram contains a box `{text}` that resolves to no module in the repo.",
-                    d.format.label()
+                    "mermaid"
                 ),
             ));
         }
@@ -344,7 +242,7 @@ fn diff(d: &Diagram, index: &CodeIndex, modules: &HashSet<String>) -> Vec<Findin
                         "Missing arrow: `{}` imports `{}` and both are drawn in the {} diagram, but no edge connects them.",
                         me.from_module,
                         me.to_module,
-                        d.format.label()
+                        "mermaid"
                     ),
                 )
                 .anchored(Provenance::modules([

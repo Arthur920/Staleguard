@@ -113,57 +113,6 @@ emit("No use of `println` outside `logger`.", ["logger"], [sym("println",["logge
 emit("Modules may not reference `singleton`.", [], [sym("singleton",[])], "gen-symbol-may-not-ref")
 BLANK()
 
-# ---------------- BARE edges (extract_bare_rules) ----------------
-C("=== GENERATED: bare-operand direct edges (no backticks; grounding-gated) ===")
-bare_modals = ["must not","should not","may not","can not","cannot","can't"]
-bare_verbs  = ["import","imports","depend on","depends on","reference","references","access","accesses","use","uses"]
-bare_nouns  = ["", " layer", " module", " package", " crate", " component", " code", " library"]
-random.shuffle(names)
-bpairs = []
-for i in range(0, len(names)-1, 2):
-    bpairs.append((names[i], names[i+1]))
-# bare grounds case-insensitively but emits real segment; keep operands lowercase & plain (no dots/dashes that break token regex boundaries are fine, but '.' splits? token is [a-z][\w.-]* so dots/dashes allowed). Avoid 'app.core' as subject start fine.
-# Bare operands must ground AND survive the BARE_STOPWORDS denylist, so drop any
-# name that collides with a stopword (e.g. "entities"); those are negatives, not
-# positives, for the bare extractor.
-BARE_STOPWORDS = {"entities","entity","module","modules","layer","layers","package",
- "packages","crate","crates","component","components","code","library","libraries",
- "class","classes","interface","interfaces","data","type","types","system","systems"}
-bare_ok_names = [n for n in names
-                 if n.replace("_","").replace("-","").replace(".","").isalnum()
-                 and n[0].isalpha()
-                 and n.lower() not in BARE_STOPWORDS]
-bpairs = []
-for i in range(0, len(bare_ok_names)-1, 2):
-    bpairs.append((bare_ok_names[i], bare_ok_names[i+1]))
-for idx,(a,b) in enumerate(bpairs):
-    if a==b: continue
-    m = bare_modals[idx % len(bare_modals)]
-    v = bare_verbs[idx % len(bare_verbs)]
-    n = bare_nouns[idx % len(bare_nouns)]
-    art = "the " if idx%2 else ""
-    emit(f"{art.capitalize() if art else ''}{a}{n} {m} {v} {b}.".strip(), [a,b], [edge(a,b)], f"gen-bare-edge-{idx}")
-BLANK()
-
-# bold + path-style bare
-C("=== GENERATED: bare edges with bold / path-style operands ===")
-emit("The **repository** layer cannot reference **service**.", ["repository","service"], [edge("repository","service")], "gen-bare-bold")
-emit("**handlers** must not access **models**.", ["handlers","models"], [edge("handlers","models")], "gen-bare-bold-both")
-emit("domain/model must not import infra/db.", ["domain/model","infra/db"], [edge("domain/model","infra/db")], "gen-bare-path")
-emit("The Auth module must not depend on Billing.", ["auth","billing"], [edge("auth","billing")], "gen-bare-mixedcase")
-emit("src/web should not import src/db.", ["src/web","src/db"], [edge("src/web","src/db")], "gen-bare-path2")
-BLANK()
-
-# ---------------- BARE reach ----------------
-C("=== GENERATED: bare-operand transitive reach ===")
-bare_reach_mid = ["transitively import","transitively depend on","indirectly use","indirectly reference","reach"]
-for idx,(a,b) in enumerate(bpairs[:8]):
-    if a==b: continue
-    m = bare_modals[idx % 3]  # must/should/may not (avoid cannot+reach quirk on bare? bare reach allows cannot but keep simple)
-    mid = bare_reach_mid[idx % len(bare_reach_mid)]
-    emit(f"{a} {m} {mid} {b}.", [a,b], [reach(a,b)], f"gen-bare-reach-{idx}")
-BLANK()
-
 # ---------------- KNOWN MISSES (intended FN) ----------------
 C("=== known misses: real rules current extractors cannot catch (intended FN) ===")
 emit("Core internals must not depend on satellite implementation classes.", ["core","satellite"], [edge("core","satellite")], "miss-multiword-operand")

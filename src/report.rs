@@ -118,7 +118,6 @@ pub(crate) fn report_rules(rows: &[rules::AuditRow], format: Format) {
                         "origin": r.origin,
                         "status": status,
                         "detail": detail,
-                        "experimental": r.origin.ends_with("[bare]"),
                     })
                 })
                 .collect();
@@ -134,7 +133,6 @@ pub(crate) fn report_rules(rows: &[rules::AuditRow], format: Format) {
                 return;
             }
             let (mut holds, mut violated, mut ungrounded) = (0, 0, 0);
-            let mut bare = 0;
             for r in rows {
                 let (mark, note) = match &r.status {
                     rules::RuleStatus::Holds => {
@@ -153,18 +151,9 @@ pub(crate) fn report_rules(rows: &[rules::AuditRow], format: Format) {
                         )
                     }
                 };
-                // Experimental bare-operand rules are flagged so they are never
-                // confused with the enforced (backticked) ones.
-                let tag = if r.origin.ends_with("[bare]") {
-                    bare += 1;
-                    " \u{2248}bare"
-                } else {
-                    ""
-                };
                 println!(
-                    "{}{}  {:<30}{}  [{}]",
+                    "{}  {:<30}{}  [{}]",
                     mark,
-                    tag,
                     r.rule.describe(),
                     note,
                     r.origin
@@ -178,13 +167,6 @@ pub(crate) fn report_rules(rows: &[rules::AuditRow], format: Format) {
                 println!(
                     "note: skipped rules are not enforced; fix the operand name so it \
                      matches a real module, or the rule is silently ignored."
-                );
-            }
-            if bare > 0 {
-                println!(
-                    "note: {bare} \u{2248}bare rule(s) were parsed from un-backticked prose \
-                     (experimental, grounded against the module graph). These are shown for \
-                     evaluation and are NOT enforced by `staleguard check`."
                 );
             }
         }

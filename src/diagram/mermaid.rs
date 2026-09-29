@@ -6,7 +6,7 @@ use std::sync::OnceLock;
 
 use regex::Regex;
 
-use super::{Diagram, DiagramKind, Edge, Format, Node};
+use super::{Diagram, Edge, Node};
 
 pub(super) fn parse(body: &str, origin: &str) -> Option<Diagram> {
     // Find the diagram header (first non-empty, non-directive line).
@@ -64,9 +64,16 @@ pub(super) fn parse(body: &str, origin: &str) -> Option<Diagram> {
             register(&c[1], Some(c[2].trim_matches('"').trim()));
         }
         // Strip pipe labels (`-->|text|`) and bracket labels so only ids and
-        // arrows remain, then split the chain on arrow operators.
+        // arrows remain, then split the chain on arrow operators. Stripping is
+        // length-preserving (spaces), so non-real label spans recorded on the
+        // original statement still index into the stripped one.
+        let non_real: Vec<(usize, usize)> = pipe_re()
+            .find_iter(stmt)
+            .filter(|m| super::non_real_label(m.as_str().trim_matches('|')))
+            .map(|m| (m.start(), m.end()))
+            .collect();
         let stripped = strip_labels(stmt);
-        parse_chain(&stripped, &mut register, &mut edges);
+        parse_chain(&stripped, &non_real, &mut register, &mut edges);
     }
     let _ = register; // drop closure, releasing the &mut borrow of `nodes`
 
@@ -74,8 +81,6 @@ pub(super) fn parse(body: &str, origin: &str) -> Option<Diagram> {
         return None;
     }
     Some(Diagram {
-        kind: DiagramKind::Flowchart,
-        format: Format::Mermaid,
         nodes,
         edges,
         origin: origin.to_string(),
@@ -106,6 +111,7 @@ fn header_tail(header: &str) -> String {
 /// handling chains like `A --> B --> C`.
 fn parse_chain<F: FnMut(&str, Option<&str>)>(
     stripped: &str,
+    non_real: &[(usize, usize)],
     register: &mut F,
     edges: &mut Vec<Edge>,
 ) {
@@ -124,10 +130,15 @@ fn parse_chain<F: FnMut(&str, Option<&str>)>(
         if let (Some(l), Some(r)) = (left.as_deref(), right.as_deref()) {
             register(l, None);
             register(r, None);
+            // A pipe label sits between its arrow and the next node/arrow.
+            let asserted = !non_real
+                .iter()
+                .any(|&(s, e)| s >= arr.end() && e <= next_start);
             edges.push(Edge {
                 from: l.to_string(),
                 to: r.to_string(),
                 directed: arr.as_str().contains('>'),
+                asserted,
             });
         }
         left = right;
@@ -135,10 +146,12 @@ fn parse_chain<F: FnMut(&str, Option<&str>)>(
 }
 
 /// Replace bracket labels (`[..]`, `(..)`, `{..}`, `>..]`) and pipe labels
-/// (`|..|`) with spaces so the residue is just `id arrow id`.
+/// (`|..|`) with same-length runs of spaces, so the residue is just
+/// `id arrow id` and byte offsets stay aligned with the original statement.
 fn strip_labels(stmt: &str) -> String {
-    let no_pipe = pipe_re().replace_all(stmt, " ");
-    bracket_re().replace_all(&no_pipe, " ").into_owned()
+    let blank = |c: &regex::Captures| " ".repeat(c[0].len());
+    let no_pipe = pipe_re().replace_all(stmt, blank);
+    bracket_re().replace_all(&no_pipe, blank).into_owned()
 }
 
 /// Leading identifier of a node reference (`A`, `api`, `web-ui`).

@@ -1,11 +1,9 @@
 //! Parsing architecture rules out of doc prose.
 //!
-//! Two extractors: the production [`extract_prose_rules`] (operands always
-//! backtick-quoted, narrow phrasings) and the experimental, audit-only
-//! [`extract_bare_rules`] (un-backticked operands kept safe by grounding + a
-//! stopword denylist). Both compile to the shared [`Rule`] vocabulary.
+//! [`extract_prose_rules`] compiles backtick-quoted, narrowly phrased rules to
+//! the shared [`Rule`] vocabulary. (An un-backticked "bare operand" extractor was
+//! tried and dropped: it found 0 rules on real repos.)
 
-use std::collections::HashSet;
 use std::sync::OnceLock;
 
 use regex::Regex;
@@ -126,185 +124,6 @@ pub fn extract_prose_rules(markdown: &str, doc_path: &str) -> Vec<SourcedRule> {
         }
     }
     rules
-}
-
-/// EXPERIMENTAL (audit-only): extract dependency rules whose module operands are
-/// *not* backtick-quoted, the dominant real-world phrasing ("the EVSE module
-/// must not depend on the Station module", "**Repository** layer cannot
-/// reference **Service**"). Backticks are normally required precisely because
-/// they keep precision at 100%; here we instead lean entirely on **grounding**:
-/// a bare operand is only accepted if it resolves to a real module in the graph,
-/// and generic prose nouns (`modules`, `details`, `low-level`, …) are denylisted
-/// so SOLID/RFC boilerplate ("high-level modules should not depend on …") cannot
-/// fire even when a same-named directory happens to exist.
-///
-/// This is wired into `staleguard rules` (the dry-run audit) ONLY, so we can
-/// measure recall/precision on real repos before letting it affect `check`.
-/// Emitted operands are canonicalised to the real module segment they matched,
-/// and each origin is tagged `[bare]` so the report can flag them.
-pub fn extract_bare_rules(
-    markdown: &str,
-    doc_path: &str,
-    modules: &HashSet<String>,
-) -> Vec<SourcedRule> {
-    let mut rules = Vec::new();
-    for (i, line, _) in logical_lines(markdown) {
-        let line = quoted_re().replace_all(&line, "");
-        let line = line.as_ref();
-        if hedged(line) {
-            continue;
-        }
-        let origin = format!("{doc_path}:{} [bare]", i + 1);
-
-        let mut push = |from: &str, to: &str, transitive: bool| {
-            let (Some(from), Some(to)) = (
-                canonical_operand(from, modules),
-                canonical_operand(to, modules),
-            ) else {
-                return;
-            };
-            if from == to {
-                return; // a module depending on itself is not a real rule
-            }
-            let rule = if transitive {
-                Rule::ForbidReach { from, to }
-            } else {
-                Rule::ForbidEdge { from, to }
-            };
-            rules.push(SourcedRule {
-                rule,
-                origin: origin.clone(),
-            });
-        };
-
-        for line in sentences(line) {
-            if hedged(line) {
-                continue;
-            }
-            for c in bare_reach_re().captures_iter(line) {
-                push(&c[1], &c[2], true);
-            }
-            for c in bare_edge_re().captures_iter(line) {
-                push(&c[1], &c[2], false);
-            }
-        }
-    }
-    rules
-}
-
-/// Generic prose nouns that are never module names: the denylist that, together
-/// with grounding, keeps SOLID/RFC/security boilerplate from being read as a
-/// rule. Compared case-insensitively against the bare operand token.
-const BARE_STOPWORDS: &[&str] = &[
-    "module",
-    "modules",
-    "layer",
-    "layers",
-    "package",
-    "packages",
-    "crate",
-    "crates",
-    "component",
-    "components",
-    "code",
-    "library",
-    "libraries",
-    "class",
-    "classes",
-    "interface",
-    "interfaces",
-    "detail",
-    "details",
-    "abstraction",
-    "abstractions",
-    "concretion",
-    "concretions",
-    "anything",
-    "nothing",
-    "something",
-    "them",
-    "it",
-    "this",
-    "that",
-    "these",
-    "those",
-    "other",
-    "others",
-    "any",
-    "all",
-    "each",
-    "both",
-    "one",
-    "low-level",
-    "high-level",
-    "client",
-    "clients",
-    "user",
-    "users",
-    "entity",
-    "entities",
-    "file",
-    "files",
-    "system",
-    "systems",
-    "function",
-    "functions",
-    "method",
-    "methods",
-    "data",
-    "type",
-    "types",
-    "thing",
-    "things",
-    "implementation",
-    "implementations",
-    "framework",
-    "frameworks",
-    "dependency",
-    "dependencies",
-    "runtime",
-    "run-time",
-    "server",
-    "scope",
-    "state",
-    "everything",
-    "concretions",
-    "abstractions",
-];
-
-/// Resolve a bare prose operand to the real module segment it names, or `None`
-/// if it grounds to no module (case-insensitive) or is a denylisted noun. The
-/// returned string is a real path segment, so [`super::matches`] accepts it verbatim.
-fn canonical_operand(op: &str, modules: &HashSet<String>) -> Option<String> {
-    let op = op.trim_matches(|c: char| !c.is_alphanumeric());
-    if op.is_empty() || BARE_STOPWORDS.iter().any(|w| w.eq_ignore_ascii_case(op)) {
-        return None;
-    }
-    // Single-segment operand: match a real path segment, preserving its case.
-    if !op.contains('/') {
-        for m in modules {
-            for seg in m.split('/') {
-                if seg.eq_ignore_ascii_case(op) {
-                    return Some(seg.to_string());
-                }
-            }
-        }
-        return None;
-    }
-    // Path-style operand (`dafny/specs`): ground by case-insensitive subtree /
-    // leaf / interior match, storing the lowercased form.
-    let lop = op.to_lowercase();
-    for m in modules {
-        let lm = m.to_lowercase();
-        if lm == lop
-            || lm.starts_with(&format!("{lop}/"))
-            || lm.ends_with(&format!("/{lop}"))
-            || lm.contains(&format!("/{lop}/"))
-        {
-            return Some(lop);
-        }
-    }
-    None
 }
 
 /// Join soft-wrapped prose lines into logical lines so a rule split across a
@@ -486,32 +305,6 @@ fn forbid_symbol_re() -> &'static Regex {
     RE.get_or_init(|| {
         Regex::new(
             r"(?i)(?:(?:must|should|may)\s+not\s+(?:use|call|invoke|reference)|don'?t\s+(?:use|call)|never\s+(?:use|call)|no\s+(?:direct|raw)(?:\s+(?:use|usage|calls?|reference)\s+(?:of|to))?|no\s+(?:use|usage|calls?)\s+(?:of|to))\s+`([^`]+)`",
-        )
-        .unwrap()
-    })
-}
-
-/// EXPERIMENTAL bare-operand direct-edge pattern (no backticks). Operands are
-/// captured as bare tokens (optionally **bold**, optionally `the …`, optionally
-/// trailed by a noun like `layer`/`module`/`code`); grounding + the stopword
-/// denylist downstream are what keep this safe. Case-insensitive.
-fn bare_edge_re() -> &'static Regex {
-    static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| {
-        Regex::new(
-            r"(?i)(?:the\s+)?\*{0,2}([a-z][\w.-]*(?:/[\w.-]+)*)\*{0,2}(?:\s+(?:layer|module|package|crate|component|code|library|internals?|implementations?|classes))?\s+(?:(?:must|should|may|can)\s+not|cannot|can'?t)\s+(?:import|imports|depend\s+on|depends\s+on|reference|references|access|accesses|use|uses)\s+(?:the\s+)?\*{0,2}([a-z][\w.-]*(?:/[\w.-]+)*)\*{0,2}",
-        )
-        .unwrap()
-    })
-}
-
-/// EXPERIMENTAL bare-operand transitive pattern (no backticks). Mirrors
-/// [`forbid_reach_re`] but with bare tokens.
-fn bare_reach_re() -> &'static Regex {
-    static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| {
-        Regex::new(
-            r"(?i)(?:the\s+)?\*{0,2}([a-z][\w.-]*(?:/[\w.-]+)*)\*{0,2}(?:\s+(?:layer|module|package|crate|component|code|library|internals?|implementations?|classes))?\s+(?:(?:must|should|may|can)\s+not|cannot|can'?t)\s+(?:(?:even\s+)?(?:transitively|indirectly)\s+(?:import|imports|depend\s+on|depends\s+on|use|uses|reference|references|reach|reaches)|reach|reaches)\s+(?:the\s+)?\*{0,2}([a-z][\w.-]*(?:/[\w.-]+)*)\*{0,2}",
         )
         .unwrap()
     })

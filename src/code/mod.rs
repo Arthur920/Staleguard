@@ -7,7 +7,6 @@ mod extract;
 pub mod facts;
 pub mod lang;
 mod resolve;
-pub mod schema;
 pub mod symbol;
 
 use std::collections::{HashMap, HashSet};
@@ -83,114 +82,6 @@ pub fn ref_callers_from(
         }
     }
     map
-}
-
-/// Prebuilt symbol lookups shared across the claim-grounding and evidence passes,
-/// so neither re-scans the whole symbol table per claim (that would be
-/// O(claims × symbols)). Borrows the index, so rebuild it if the index changes.
-/// Only the `ml` build's Layer 2/3 uses it.
-#[cfg(feature = "ml")]
-pub struct SymbolLookup<'a> {
-    symbols: &'a [Symbol],
-    /// `qualified_name` -> all symbol indices with that name (ascending).
-    by_qname: HashMap<&'a str, Vec<usize>>,
-    /// `name` -> earliest symbol index with that leaf name.
-    by_name: HashMap<&'a str, usize>,
-    /// leaf of `qualified_name` (segment after the last `::`) -> earliest index.
-    by_leaf: HashMap<&'a str, usize>,
-    /// module path -> symbol indices defined in it (ascending).
-    by_module: HashMap<&'a str, Vec<usize>>,
-    /// the index's `module_set` (symbol modules + edge sources), borrowed.
-    modules: HashSet<&'a str>,
-}
-
-#[cfg(feature = "ml")]
-impl<'a> SymbolLookup<'a> {
-    pub fn build(index: &'a CodeIndex) -> SymbolLookup<'a> {
-        let symbols = index.symbols.as_slice();
-        let mut by_qname: HashMap<&str, Vec<usize>> = HashMap::new();
-        let mut by_name: HashMap<&str, usize> = HashMap::new();
-        let mut by_leaf: HashMap<&str, usize> = HashMap::new();
-        let mut by_module: HashMap<&str, Vec<usize>> = HashMap::new();
-        let mut modules: HashSet<&str> = HashSet::new();
-        for (i, s) in symbols.iter().enumerate() {
-            by_qname.entry(&s.qualified_name).or_default().push(i);
-            by_name.entry(&s.name).or_insert(i);
-            let leaf = s
-                .qualified_name
-                .rsplit("::")
-                .next()
-                .unwrap_or(&s.qualified_name);
-            by_leaf.entry(leaf).or_insert(i);
-            by_module.entry(&s.module).or_default().push(i);
-            modules.insert(&s.module);
-        }
-        for e in &index.edges {
-            modules.insert(&e.from_module);
-        }
-        SymbolLookup {
-            symbols,
-            by_qname,
-            by_name,
-            by_leaf,
-            by_module,
-            modules,
-        }
-    }
-
-    /// The earliest symbol whose `qualified_name == tok`, `name == tok`, or
-    /// `qualified_name` ends with `::tok`, faithfully matching the original
-    /// linear `find` (first symbol satisfying any of the three). Tokens that
-    /// contain `::` fall back to a scan, since a general suffix match can't be
-    /// served by the hashed indexes; such tokens are rare for backtick names.
-    pub fn resolve_token(&self, tok: &str) -> Option<&'a Symbol> {
-        if tok.contains("::") {
-            return self.symbols.iter().find(|s| {
-                s.qualified_name == tok
-                    || s.name == tok
-                    || s.qualified_name.ends_with(&format!("::{tok}"))
-            });
-        }
-        // Each map already holds the earliest index for its key, so the min over
-        // the three is the earliest symbol matching any condition.
-        [
-            self.by_qname.get(tok).map(|v| v[0]),
-            self.by_name.get(tok).copied(),
-            self.by_leaf.get(tok).copied(),
-        ]
-        .into_iter()
-        .flatten()
-        .min()
-        .map(|i| &self.symbols[i])
-    }
-
-    /// All symbols whose `qualified_name` equals `qn`.
-    pub fn by_qualified(&self, qn: &str) -> impl Iterator<Item = &'a Symbol> + '_ {
-        self.by_qname
-            .get(qn)
-            .into_iter()
-            .flatten()
-            .map(move |&i| &self.symbols[i])
-    }
-
-    /// Public symbols defined in module `m`.
-    pub fn public_in_module(&self, m: &str) -> impl Iterator<Item = &'a Symbol> + '_ {
-        self.by_module
-            .get(m)
-            .into_iter()
-            .flatten()
-            .map(move |&i| &self.symbols[i])
-            .filter(|s| s.visibility == symbol::Visibility::Public)
-    }
-
-    /// The first module whose path fuzzily matches `tok` (the module fallback for
-    /// a backtick token that grounded to no symbol).
-    pub fn module_matches(&self, tok: &str) -> Option<&'a str> {
-        self.modules
-            .iter()
-            .find(|m| crate::rules::matches(m, tok))
-            .copied()
-    }
 }
 
 impl CodeIndex {
