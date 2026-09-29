@@ -31,8 +31,8 @@ pub struct Manifests {
 
 impl Manifests {
     /// Load every manifest from `root` itself. Thin wrapper over
-    /// [`Manifests::load_nearest`]; kept for tests and single-dir callers.
-    #[cfg_attr(not(test), allow(dead_code))]
+    /// [`Manifests::load_nearest`] for tests.
+    #[cfg(test)]
     pub fn load(root: &Path) -> Manifests {
         Manifests::load_nearest(root, root)
     }

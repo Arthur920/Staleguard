@@ -17,17 +17,10 @@ mod extract;
 mod verify;
 
 use std::collections::HashSet;
-#[allow(unused_imports)]
-use std::path::Path;
 
 pub use audit::{audit, AuditRow, RuleStatus};
 pub use extract::extract_prose_rules;
 pub use verify::check;
-
-#[allow(unused_imports)]
-use crate::code::CodeIndex;
-#[allow(unused_imports)]
-use crate::findings::{Finding, Verdict};
 
 /// A compiled architectural invariant.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -108,7 +101,10 @@ pub(super) fn quote_list(items: &[String]) -> String {
 mod tests {
     use super::*;
     use crate::code::symbol::{DepEdge, Facts, RefEdge, Span, Symbol, SymbolKind, Visibility};
+    use crate::code::CodeIndex;
+    use crate::findings::{Finding, Verdict};
     use std::fs;
+    use std::path::Path;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn edge(from: &str, to: &str) -> DepEdge {
@@ -130,8 +126,6 @@ mod tests {
             signature: None,
             doc: None,
             facts: Facts::default(),
-            calls: Vec::new(),
-            members: Vec::new(),
         }
     }
 

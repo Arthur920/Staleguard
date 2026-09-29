@@ -393,52 +393,6 @@
     color: var(--blade); background: rgba(127,166,191,0.08); padding: 1px 5px; border-radius: 2px;
   }
 
-  /* ---------- model metrics ---------- */
-  .metrics { background: var(--iron); border-top: 1px solid var(--edge); border-bottom: 1px solid var(--edge); }
-  .metrics-head { display: grid; grid-template-columns: 1fr 1fr; gap: 48px; align-items: end; }
-  @media (max-width: 820px) { .metrics-head { grid-template-columns: 1fr; gap: 16px; } }
-
-  .metric-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 48px; }
-  @media (max-width: 560px) { .metric-cards { grid-template-columns: 1fr; } }
-  .metric {
-    background: linear-gradient(180deg, var(--steel), var(--iron));
-    border: 1px solid var(--edge); border-radius: var(--r);
-    padding: 32px; position: relative; overflow: hidden;
-  }
-  .metric.hero-metric { border-color: var(--brass-deep); }
-  .metric.hero-metric::after {
-    content: ""; position: absolute; inset: 0;
-    background: radial-gradient(400px 200px at 100% 0%, rgba(210,164,79,0.10), transparent);
-    pointer-events: none;
-  }
-  .metric .label {
-    font-family: "JetBrains Mono", monospace; font-size: 0.72rem;
-    letter-spacing: 0.16em; text-transform: uppercase; color: var(--ash); margin-bottom: 12px;
-  }
-  .metric .num {
-    font-family: "Cinzel", serif; font-weight: 700; line-height: 1;
-    font-size: clamp(2.8rem, 6vw, 4rem); color: var(--bone);
-  }
-  .metric.hero-metric .num { color: var(--brass-bright); }
-  .metric .target {
-    font-family: "JetBrains Mono", monospace; font-size: 0.78rem;
-    color: var(--ash-2); margin-top: 12px;
-  }
-  .metric .target .ok { color: var(--good); }
-  .metric .target .over { color: var(--blade); }
-
-  .bars { margin-top: 48px; display: grid; gap: 18px; max-width: 720px; }
-  .bar-row { display: grid; grid-template-columns: 130px 1fr 96px; align-items: center; gap: 18px; }
-  .bar-row .name { font-family: "JetBrains Mono", monospace; font-size: 0.8rem; color: var(--ash-2); }
-  .bar-track { height: 10px; background: var(--steel); border-radius: 100px; overflow: hidden; border: 1px solid var(--edge); }
-  .bar-fill { height: 100%; border-radius: 100px; width: 0; transition: width 1.2s cubic-bezier(.2,.8,.2,1); }
-  .bar-fill.tuned { background: linear-gradient(90deg, var(--brass-deep), var(--brass-bright)); }
-  .bar-fill.base { background: var(--rivet); }
-  .bar-row .val { font-family: "JetBrains Mono", monospace; font-size: 0.82rem; text-align: right; color: var(--bone); }
-  .bars-legend { font-family: "JetBrains Mono", monospace; font-size: 0.72rem; color: var(--ash); margin-top: 8px; display: flex; gap: 22px; flex-wrap: wrap; }
-  .bars-legend span { display: inline-flex; align-items: center; gap: 7px; }
-  .bars-legend i { width: 12px; height: 12px; border-radius: 2px; display: inline-block; }
-  @media (max-width: 560px) { .bar-row { grid-template-columns: 90px 1fr 60px; gap: 10px; } }
 
   /* ---------- usage / code blocks ---------- */
   .tabs { display: flex; gap: 6px; margin-top: 48px; flex-wrap: wrap; }
@@ -758,9 +712,6 @@ staleguard check --fail-on-regression --format json">COPY</button></div>
     entries.forEach(e => {
       if (e.isIntersecting) {
         e.target.classList.add('in');
-        if (e.target.id === 'bars') {
-          e.target.querySelectorAll('.bar-fill').forEach(f => f.style.width = f.dataset.w + '%');
-        }
         io.unobserve(e.target);
       }
     });

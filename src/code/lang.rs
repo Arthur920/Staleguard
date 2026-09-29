@@ -1,5 +1,5 @@
 //! Language detection, per-language tree-sitter config, and the shared
-//! code-file walker (hoisted here so the `ml` retrieval path reuses it).
+//! code-file walker.
 
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
@@ -20,7 +20,7 @@ pub enum Language {
     Java,
 }
 
-/// File extensions we treat as code (also gates the Layer-2 chunker).
+/// File extensions we treat as code.
 pub const CODE_EXTS: &[&str] = &[
     "rs", "py", "ts", "tsx", "js", "jsx", "mjs", "cjs", "java", "go", "rb", "c", "h", "cpp", "hpp",
     "cc", "cs", "php", "swift", "kt", "scala", "sh", "toml", "yaml", "yml",
@@ -180,8 +180,18 @@ impl Language {
                 "[(import_statement name: (dotted_name) @import)
                   (import_from_statement module_name: (dotted_name) @import)]"
             }
+            // Static imports, re-exports (`export … from`), `require("x")`, and
+            // dynamic `import("x")`. Only the `@import` capture is an edge.
             Language::JavaScript | Language::TypeScript | Language::Tsx => {
-                "(import_statement source: (string) @import)"
+                r#"(import_statement source: (string) @import)
+                (export_statement source: (string) @import)
+                (call_expression
+                  function: (identifier) @_fn
+                  arguments: (arguments . (string) @import)
+                  (#eq? @_fn "require"))
+                (call_expression
+                  function: (import)
+                  arguments: (arguments . (string) @import))"#
             }
             Language::Java => "(import_declaration (scoped_identifier) @import)",
         }

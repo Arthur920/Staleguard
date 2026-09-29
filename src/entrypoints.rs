@@ -199,8 +199,6 @@ mod tests {
             signature: None,
             doc: None,
             facts: Facts::default(),
-            calls: Vec::new(),
-            members: Vec::new(),
         }
     }
 

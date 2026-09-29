@@ -1,7 +1,6 @@
 //! Per-file extraction: symbols via tree-sitter-tags, dependency edges via a
 //! small per-language import query.
 
-use std::collections::HashMap;
 use std::ops::Range;
 use std::path::Path;
 
@@ -125,19 +124,12 @@ fn symbols_and_refs(
         };
 
         // tree-sitter-tags collapses enums into the `class` tag kind, so detect
-        // them from the AST node and correct the kind. Enum variants are the
-        // ground truth for state-diagram grounding.
-        let members = match def_node {
-            Some(node) if is_enum_node(node.kind()) => {
-                kind = SymbolKind::Enum;
-                enum_variants(node, source, language)
-            }
-            Some(node) if language == Language::Python && is_python_enum(node, source) => {
-                kind = SymbolKind::Enum;
-                python_enum_members(node, source)
-            }
-            _ => Vec::new(),
-        };
+        // them from the AST node and correct the kind.
+        if def_node.is_some_and(|n| {
+            is_enum_node(n.kind()) || (language == Language::Python && is_python_enum(n, source))
+        }) {
+            kind = SymbolKind::Enum;
+        }
 
         symbols.push(Symbol {
             qualified_name,
@@ -150,8 +142,6 @@ fn symbols_and_refs(
             signature: decl_line,
             doc: tag.docs.clone(),
             facts: fact_data,
-            calls: Vec::new(),
-            members,
         });
     }
 
@@ -165,21 +155,8 @@ fn symbols_and_refs(
         }
     }
 
-    // Ordered call list per definition: walk reference sites in source order and
-    // attribute each to its innermost enclosing definition. Preserves order and
-    // repetition (unlike the deduped global `ref_edges`) for sequence alignment.
+    // Source order keeps the resolved caller lists (and so the output) stable.
     ref_sites.sort_by_key(|(_, pos)| *pos);
-    let mut calls_by_def: HashMap<&str, Vec<String>> = HashMap::new();
-    for (name, pos) in &ref_sites {
-        if let Some(q) = enclosing(&defs, *pos) {
-            calls_by_def.entry(q).or_default().push(name.clone());
-        }
-    }
-    for s in &mut symbols {
-        if let Some(c) = calls_by_def.get(s.qualified_name.as_str()) {
-            s.calls = c.clone();
-        }
-    }
 
     let refs = ref_sites
         .into_iter()
@@ -243,72 +220,6 @@ fn is_python_enum(node: tree_sitter::Node, source: &[u8]) -> bool {
     false
 }
 
-/// Member names of a Python enum: the simple `NAME = value` assignments at the
-/// class body's top level. Skips dunder/private names and method definitions.
-fn python_enum_members(node: tree_sitter::Node, source: &[u8]) -> Vec<String> {
-    let Some(body) = node.child_by_field_name("body") else {
-        return Vec::new();
-    };
-    let mut out = Vec::new();
-    let mut cursor = body.walk();
-    for stmt in body.children(&mut cursor) {
-        if stmt.kind() != "expression_statement" {
-            continue;
-        }
-        let mut inner = stmt.walk();
-        for child in stmt.children(&mut inner) {
-            if child.kind() != "assignment" {
-                continue;
-            }
-            let Some(left) = child.child_by_field_name("left") else {
-                continue;
-            };
-            if left.kind() != "identifier" {
-                continue;
-            }
-            if let Ok(name) = left.utf8_text(source) {
-                if !name.starts_with('_') {
-                    out.push(name.to_string());
-                }
-            }
-        }
-    }
-    out
-}
-
-/// Variant names of an enum definition node. Per-language variant node kinds;
-/// languages whose enum shape we don't model (e.g. Python's class-based enums)
-/// yield nothing, so state-diagram grounding simply no-ops for them.
-fn enum_variants(node: tree_sitter::Node, source: &[u8], lang: Language) -> Vec<String> {
-    let kinds: &[&str] = match lang {
-        Language::Rust => &["enum_variant"],
-        Language::Java => &["enum_constant"],
-        _ => &[],
-    };
-    if kinds.is_empty() {
-        return Vec::new();
-    }
-    let mut out = Vec::new();
-    collect_variants(node, source, kinds, &mut out);
-    out
-}
-
-fn collect_variants(node: tree_sitter::Node, source: &[u8], kinds: &[&str], out: &mut Vec<String>) {
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        if kinds.contains(&child.kind()) {
-            if let Some(name) = child
-                .child_by_field_name("name")
-                .and_then(|n| n.utf8_text(source).ok())
-            {
-                out.push(name.to_string());
-            }
-        } else {
-            collect_variants(child, source, kinds, out);
-        }
-    }
-}
-
 /// The innermost definition whose byte range contains `pos`. Among containing
 /// ranges the one with the largest `start` is the most deeply nested.
 fn enclosing(defs: &[(Range<usize>, String)], pos: usize) -> Option<&str> {
@@ -331,11 +242,12 @@ fn import_edges(
         return Vec::new();
     };
 
+    let import_idx = query.capture_index_for_name("import");
     let mut cursor = QueryCursor::new();
     let mut matches = cursor.matches(query, root, source);
     let mut edges = Vec::new();
     while let Some(m) = matches.next() {
-        for cap in m.captures {
+        for cap in m.captures.iter().filter(|c| Some(c.index) == import_idx) {
             let raw = cap.node.utf8_text(source).unwrap_or("");
             let target = normalize_import(raw);
             if !target.is_empty() {
@@ -518,6 +430,18 @@ mod tests {
     }
 
     #[test]
+    fn ts_reexports_require_and_dynamic_import_are_edges() {
+        let src = b"export { z } from \"./ui/z\";\nexport * from \"./all\";\n\
+            const a = require(\"./req\");\nconst b = import(\"./lazy\");\n\
+            foo(\"./not-an-import\");\n";
+        for lang in [Language::JavaScript, Language::TypeScript, Language::Tsx] {
+            let edges = extract_edges(lang, src, "m");
+            let got: Vec<&str> = edges.iter().map(|e| e.to_module.as_str()).collect();
+            assert_eq!(got, ["./ui/z", "./all", "./req", "./lazy"], "{lang:?}");
+        }
+    }
+
+    #[test]
     fn java_symbols_and_edges() {
         let src = b"import a.b.C;\npublic class A {\n  public void m() {}\n}\n";
         let (syms, _refs) = extract_symbols_and_refs(Language::Java, src, "m", "m.java");
@@ -544,31 +468,20 @@ mod tests {
     }
 
     #[test]
-    fn calls_are_captured_in_source_order() {
-        // foo's body calls a, then (inside an if) b, then c -> ordered [a, b, c].
-        let src = b"fn a() {}\nfn b() {}\nfn c() {}\n\
-                    fn foo(x: bool) {\n    a();\n    if x { b(); }\n    c();\n}\n";
-        let (syms, _refs) = extract_symbols_and_refs(Language::Rust, src, "m", "m.rs");
-        let foo = syms.iter().find(|s| s.name == "foo").unwrap();
-        assert_eq!(foo.calls, vec!["a", "b", "c"]);
-    }
-
-    #[test]
-    fn enum_variants_are_extracted_as_members() {
+    fn rust_enum_is_an_enum() {
         let src = b"pub enum State {\n    Idle,\n    Running,\n    Done,\n}\n";
         let (syms, _refs) = extract_symbols_and_refs(Language::Rust, src, "m", "m.rs");
         let en = syms.iter().find(|s| s.name == "State").unwrap();
-        assert_eq!(en.members, vec!["Idle", "Running", "Done"]);
+        assert_eq!(en.kind, SymbolKind::Enum);
     }
 
     #[test]
-    fn python_class_enum_members_are_extracted() {
+    fn python_class_enum_is_an_enum() {
         let src = b"from enum import Enum\n\
                     class State(Enum):\n    IDLE = 1\n    RUNNING = 2\n    DONE = 3\n";
         let (syms, _refs) = extract_symbols_and_refs(Language::Python, src, "m", "m.py");
         let en = syms.iter().find(|s| s.name == "State").unwrap();
         assert_eq!(en.kind, SymbolKind::Enum);
-        assert_eq!(en.members, vec!["IDLE", "RUNNING", "DONE"]);
     }
 
     #[test]
@@ -577,7 +490,6 @@ mod tests {
         let (syms, _refs) = extract_symbols_and_refs(Language::Python, src, "m", "m.py");
         let cls = syms.iter().find(|s| s.name == "Plain").unwrap();
         assert_ne!(cls.kind, SymbolKind::Enum);
-        assert!(cls.members.is_empty());
     }
 
     #[test]

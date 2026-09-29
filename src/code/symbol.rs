@@ -45,9 +45,8 @@ pub struct Span {
 }
 
 impl Span {
-    /// An empty span: the `body_span` fallback for synthetic symbols and the
-    /// serde default if a `Symbol` is ever deserialized.
-    #[allow(dead_code)]
+    /// An empty span for synthetic test symbols.
+    #[cfg(test)]
     pub fn zero() -> Span {
         Span {
             path: String::new(),
@@ -94,23 +93,11 @@ pub struct Symbol {
     /// Full definition range (covers the body). Drift maps git hunks to symbols
     /// by overlapping changed line ranges against this. Defaults to `span` for
     /// synthetic symbols that don't set it.
-    #[serde(default = "Span::zero")]
     pub body_span: Span,
     pub signature: Option<String>,
     /// leading-comment documentation captured by the tags query, if any.
     pub doc: Option<String>,
     pub facts: Facts,
-    /// Callee names this definition references, in **source order** (control flow
-    /// flattened, innermost-attributed). The ordered substrate sequence-diagram
-    /// alignment compares against (ordered diagrams); unlike `ref_edges` it
-    /// preserves order and repetition.
-    #[serde(default)]
-    pub calls: Vec<String>,
-    /// For an `Enum`, its variant names: the ground truth state-diagram grounding
-    /// checks against. Empty for non-enums (and for languages whose enum-variant
-    /// shape we don't extract yet).
-    #[serde(default)]
-    pub members: Vec<String>,
 }
 
 /// A module-level dependency, derived from import/use statements.

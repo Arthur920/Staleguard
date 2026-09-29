@@ -111,7 +111,14 @@ impl CodeIndex {
             raw_per_file.push(r);
         }
         let ref_callers = resolve_refs(&symbols, raw_per_file.into_iter().flatten());
-        let module_edges = resolve_module_edges(&symbols, &edges);
+        // Every parsed file is a module, even one with no symbols (a barrel
+        // `index.ts` of re-exports), so imports of it still resolve.
+        let file_langs: HashMap<String, Language> = files
+            .iter()
+            .filter_map(|f| Some((lang::module_path(f, repo_root), Language::from_path(f)?)))
+            .collect();
+        let tsconfigs = resolve::load_tsconfigs(repo_root);
+        let module_edges = resolve_module_edges(&file_langs, &edges, &tsconfigs);
         CodeIndex {
             symbols,
             edges,
@@ -130,12 +137,6 @@ impl CodeIndex {
             .collect()
     }
 
-    /// Symbols defined in a given module path. (Consumed by coverage-gaps.)
-    #[allow(dead_code)]
-    pub fn symbols_in<'a>(&'a self, module: &'a str) -> impl Iterator<Item = &'a Symbol> {
-        self.symbols.iter().filter(move |s| s.module == module)
-    }
-
     /// Number of distinct symbols that reference `qualified_name`: the
     /// per-symbol risk signal for coverage-gaps, and the basis for the
     /// dead-code-vs-undocumented distinction.
@@ -149,28 +150,22 @@ impl CodeIndex {
 /// Turn raw import edges into a resolved internal module graph: map each
 /// `to_module` (the import as written) to a real repo module via the source
 /// language's rules, dropping externals, self-edges, and duplicates.
-fn resolve_module_edges(symbols: &[Symbol], edges: &[DepEdge]) -> Vec<DepEdge> {
-    let module_set: HashSet<String> = symbols
-        .iter()
-        .map(|s| s.module.clone())
-        .chain(edges.iter().map(|e| e.from_module.clone()))
-        .collect();
-
-    // First-seen language per module, from each symbol's source file.
-    let mut module_lang: HashMap<&str, Language> = HashMap::new();
-    for s in symbols {
-        if let Some(l) = Language::from_path(Path::new(&s.span.path)) {
-            module_lang.entry(s.module.as_str()).or_insert(l);
-        }
-    }
+/// `file_langs` maps every parsed file's module path to its language.
+fn resolve_module_edges(
+    file_langs: &HashMap<String, Language>,
+    edges: &[DepEdge],
+    tsconfigs: &[resolve::TsConfig],
+) -> Vec<DepEdge> {
+    let module_set: HashSet<String> = file_langs.keys().cloned().collect();
 
     let mut seen: HashSet<(String, String)> = HashSet::new();
     let mut out = Vec::new();
     for e in edges {
-        let Some(&lang) = module_lang.get(e.from_module.as_str()) else {
+        let Some(&lang) = file_langs.get(&e.from_module) else {
             continue;
         };
-        let Some(to) = resolve::resolve_import(&e.to_module, &e.from_module, lang, &module_set)
+        let Some(to) =
+            resolve::resolve_import(&e.to_module, &e.from_module, lang, &module_set, tsconfigs)
         else {
             continue;
         };
@@ -269,6 +264,58 @@ mod tests {
     use super::*;
     use symbol::{Facts, Span, SymbolKind, Visibility};
 
+    /// A typical TS repo: dotted file names, a barrel `index.ts` with only
+    /// re-exports, a tsconfig path alias, and a re-export. Every import must
+    /// land in the module graph.
+    #[test]
+    fn typescript_imports_resolve_end_to_end() {
+        let dir = std::env::temp_dir().join(format!(
+            "staleguard-ts-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let files = [
+            (
+                "src/app.ts",
+                "import { u } from \"./user.service\";\nimport { h } from \"./lib\";\n\
+                 import { k } from \"@/lib/keys\";\nexport { z } from \"./ui/z\";\n",
+            ),
+            ("src/user.service.ts", "export const u = 1;\n"),
+            ("src/lib/index.ts", "export * from \"./keys\";\n"),
+            ("src/lib/keys.ts", "export const k = 1;\n"),
+            ("src/ui/z.ts", "export const z = 1;\n"),
+            (
+                "tsconfig.json",
+                "{ // aliases\n \"compilerOptions\": { \"paths\": { \"@/*\": [\"src/*\"] } } }",
+            ),
+        ];
+        for (path, body) in files {
+            let p = dir.join(path);
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(p, body).unwrap();
+        }
+        let index = CodeIndex::build(&dir);
+        let mut got: Vec<(&str, &str)> = index
+            .module_edges
+            .iter()
+            .map(|e| (e.from_module.as_str(), e.to_module.as_str()))
+            .collect();
+        got.sort();
+        assert_eq!(
+            got,
+            [
+                ("src/app", "src/lib/index"),
+                ("src/app", "src/lib/keys"),
+                ("src/app", "src/ui/z"),
+                ("src/app", "src/user.service"),
+                ("src/lib/index", "src/lib/keys"),
+            ]
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     fn sym(name: &str, qualified: &str) -> Symbol {
         Symbol {
             qualified_name: qualified.to_string(),
@@ -285,8 +332,6 @@ mod tests {
             signature: None,
             doc: None,
             facts: Facts::default(),
-            calls: Vec::new(),
-            members: Vec::new(),
         }
     }
 

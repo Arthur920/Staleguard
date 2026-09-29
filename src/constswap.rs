@@ -542,8 +542,6 @@ mod tests {
                 constants: constants.iter().map(|c| c.to_string()).collect(),
                 ..Default::default()
             },
-            calls: vec![],
-            members: vec![],
         }
     }
 

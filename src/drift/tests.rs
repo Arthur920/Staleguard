@@ -106,8 +106,6 @@ fn path_claims_bucket_to_their_module_or_path() {
         signature: None,
         doc: None,
         facts: Facts::default(),
-        calls: Vec::new(),
-        members: Vec::new(),
     };
     let index = CodeIndex {
         symbols: vec![sym],
@@ -153,8 +151,6 @@ fn behavioral_drift_flag_fires_when_ledger_hash_is_stale() {
             constants: vec!["3".into()],
             ..Default::default()
         },
-        calls: Vec::new(),
-        members: Vec::new(),
     };
     let current_hash = facts::facts_hash(&sym.facts);
     assert_ne!(current_hash, 0);
