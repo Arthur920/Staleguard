@@ -5,7 +5,6 @@ mod claim;
 mod code;
 mod commands;
 mod config;
-mod coverage;
 mod drift;
 mod entrypoints;
 mod extract;
@@ -47,8 +46,6 @@ Examples:
   staleguard check --format json    machine-readable findings (exits non-zero on drift)
   staleguard check --format sarif   SARIF for GitHub code scanning / PR annotations
   staleguard check --write-ledger   set the CI alignment baseline on the base branch
-  staleguard index                  print code symbols + module/reference edges
-  staleguard coverage               public code surface no doc describes
 
 Run `staleguard <command> --help` for per-command options.";
 
@@ -74,46 +71,20 @@ enum Commands {
         #[arg(long)]
         fail_on_regression: bool,
         /// Drop findings below this severity (`note` < `warning` < `error`) from
-        /// the report, the SARIF, and the failing set. Default `warning` hides the
-        /// high-volume `undocumented` notes and shows only provable drift; `note`
-        /// keeps everything (including the undocumented-surface coverage report);
-        /// `error` keeps only broken refs and contradictions.
+        /// the report, the SARIF, and the failing set. `error` keeps only broken
+        /// refs and contradictions.
         /// Overrides `min_severity` in `.staleguard.toml`.
         #[arg(long, value_enum)]
         min_severity: Option<findings::Severity>,
         /// Restrict doc-vs-code checks to these doc paths (repeatable; matched by
-        /// exact relative path or path suffix). Skips the repo-wide coverage and
-        /// history passes, so it is far cheaper, useful for checking a single
-        /// changed doc.
+        /// exact relative path or path suffix), e.g. to check a single changed doc.
         #[arg(long = "doc")]
         docs: Vec<String>,
     },
-    /// Extract and print the code index (symbols + dependency edges).
-    Index {
-        /// Repo root (default: cwd).
-        #[arg(default_value = ".")]
-        path: PathBuf,
-        /// Output format.
-        #[arg(long, value_enum, default_value_t = Format::Text)]
-        format: Format,
-    },
-    /// Report public code surface that no doc describes (code -> doc gaps).
-    Coverage {
-        /// Repo root (default: cwd).
-        #[arg(default_value = ".")]
-        path: PathBuf,
-        /// Output format.
-        #[arg(long, value_enum, default_value_t = Format::Text)]
-        format: Format,
-    },
 }
 
-pub(crate) fn collect_docs(root: &Path) -> Vec<PathBuf> {
-    collect_docs_filtered(root, &[])
-}
-
-/// `collect_docs`, optionally restricted to the docs named in `filter` (matched
-/// by exact relative path or path suffix, e.g. `README.md` or `docs/usage.md`).
+/// Every checkable doc, optionally restricted to the docs named in `filter`
+/// (matched by exact relative path or path suffix, e.g. `README.md`).
 /// An empty filter means "every doc" (the changelog exclusion still applies).
 pub(crate) fn collect_docs_filtered(root: &Path, filter: &[String]) -> Vec<PathBuf> {
     let mut site_cache: HashMap<PathBuf, bool> = HashMap::new();
@@ -255,12 +226,6 @@ fn run_check(
     doc_filter: &[String],
     min_severity: Option<findings::Severity>,
 ) -> drift::Outcome {
-    // `--doc` scoping: restrict every doc-derived pass to the named docs and skip
-    // the repo-wide coverage/history passes (which answer "what code is
-    // undocumented", a whole-repo question that a single-doc check doesn't ask).
-    // This is what makes a scoped run cheap: no 1000-commit history parse and no
-    // coverage ranking.
-    let scoped = !doc_filter.is_empty();
     // Optional `.staleguard.toml`: doc-exclude globs + verdict suppression. A
     // malformed file aborts the run rather than silently dropping a check.
     let settings = settings::Settings::load(root).unwrap_or_else(|e| {
@@ -275,13 +240,6 @@ fn run_check(
     let mut manifest_cache: HashMap<PathBuf, commands::Manifests> = HashMap::new();
     let code_tokens = config::code_tokens(root);
     let grounding = entrypoints::Grounding::from_index(&index);
-    // One git-history fetch shared by every history-mining pass (coverage risk
-    // ranking). Skipped entirely when scoped.
-    let history = if scoped {
-        Vec::new()
-    } else {
-        git::file_change_history(root, drift::coupling::MAX_COMMITS)
-    };
     // The repo's path list, walked once, so each doc's path claims match in
     // memory instead of re-walking the whole tree per claim.
     let repo_files = verify::repo_paths(root);
@@ -327,26 +285,13 @@ fn run_check(
     }
     suggest::annotate(&mut findings, root, &repo_files, &code_tokens, &pkg_scripts);
 
-    // Code -> doc coverage gaps: undocumented public surface, anchored to its
-    // symbol so it scores as its own dimension of the alignment score. This is a
-    // whole-repo question, so a `--doc`-scoped run skips it.
-    if !scoped {
-        findings.extend(coverage::gaps(&index, root, &history));
-    }
-
-    // Verdict suppression from `.staleguard.toml` (e.g. opt out of `undocumented`).
+    // Verdict suppression from `.staleguard.toml` (e.g. opt out of `unverifiable`).
     // Applied before the drift pipeline so suppressed findings neither report nor
     // gate. `Supported` claims are untouched, so the alignment score is unaffected.
     settings.apply_suppression(&mut findings);
-    // Severity threshold: the `--min-severity` flag wins, else the config value,
-    // else the default. The default is `warning`, which hides the high-volume
-    // `undocumented` notes so the out-of-the-box run shows only provable drift
-    // (broken refs, contradictions). Pass `--min-severity note` to see everything,
-    // including the undocumented-surface coverage report.
+    // Severity threshold: the `--min-severity` flag wins, else the config value.
     // Same pre-pipeline placement, so dropped findings neither report nor gate.
-    let threshold = min_severity
-        .or(settings.min_severity)
-        .or(Some(findings::Severity::Warning));
+    let threshold = min_severity.or(settings.min_severity);
     settings::Settings::apply_severity_threshold(&mut findings, threshold);
     drift::run(findings, &index, root, opts)
 }
@@ -373,22 +318,6 @@ fn main() -> ExitCode {
             report::report_check(&out, format);
             // Fail on any reportable finding, or on a score regression in CI.
             if out.findings.is_empty() && out.regression.is_none() {
-                ExitCode::SUCCESS
-            } else {
-                ExitCode::FAILURE
-            }
-        }
-        Commands::Index { path, format } => {
-            let root = std::fs::canonicalize(&path).unwrap_or(path);
-            let index = CodeIndex::build(&root);
-            report::report_index(&index, format);
-            ExitCode::SUCCESS
-        }
-        Commands::Coverage { path, format } => {
-            let root = std::fs::canonicalize(&path).unwrap_or(path);
-            let findings = coverage::run(&root);
-            report::report(&findings, format);
-            if findings.is_empty() {
                 ExitCode::SUCCESS
             } else {
                 ExitCode::FAILURE

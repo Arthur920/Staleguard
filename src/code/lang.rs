@@ -5,7 +5,6 @@ use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
 use tree_sitter::Language as TsLanguage;
-use tree_sitter::Query;
 use tree_sitter_tags::TagsConfiguration;
 use walkdir::{DirEntry, WalkDir};
 
@@ -127,14 +126,6 @@ impl Language {
             .as_ref()
     }
 
-    /// The compiled import-edge query, built once per language and reused across
-    /// every file (same rationale as [`tags_config_cached`]).
-    pub fn import_query_compiled(self) -> Option<&'static Query> {
-        self.query_slot()
-            .get_or_init(|| Query::new(&self.ts_language(), self.import_query()).ok())
-            .as_ref()
-    }
-
     /// Per-language storage slot for the cached tag config.
     fn config_slot(self) -> &'static OnceLock<Option<TagsConfiguration>> {
         static RUST: OnceLock<Option<TagsConfiguration>> = OnceLock::new();
@@ -150,50 +141,6 @@ impl Language {
             Language::TypeScript => &TS,
             Language::Tsx => &TSX,
             Language::Java => &JAVA,
-        }
-    }
-
-    /// Per-language storage slot for the cached import query.
-    fn query_slot(self) -> &'static OnceLock<Option<Query>> {
-        static RUST: OnceLock<Option<Query>> = OnceLock::new();
-        static PYTHON: OnceLock<Option<Query>> = OnceLock::new();
-        static JS: OnceLock<Option<Query>> = OnceLock::new();
-        static TS: OnceLock<Option<Query>> = OnceLock::new();
-        static TSX: OnceLock<Option<Query>> = OnceLock::new();
-        static JAVA: OnceLock<Option<Query>> = OnceLock::new();
-        match self {
-            Language::Rust => &RUST,
-            Language::Python => &PYTHON,
-            Language::JavaScript => &JS,
-            Language::TypeScript => &TS,
-            Language::Tsx => &TSX,
-            Language::Java => &JAVA,
-        }
-    }
-
-    /// A tree-sitter query that captures imported module paths, for dep edges.
-    /// Node names are grammar-specific; verified by the per-language tests.
-    pub fn import_query(self) -> &'static str {
-        match self {
-            Language::Rust => "(use_declaration argument: (_) @import)",
-            Language::Python => {
-                "[(import_statement name: (dotted_name) @import)
-                  (import_from_statement module_name: (dotted_name) @import)]"
-            }
-            // Static imports, re-exports (`export … from`), `require("x")`, and
-            // dynamic `import("x")`. Only the `@import` capture is an edge.
-            Language::JavaScript | Language::TypeScript | Language::Tsx => {
-                r#"(import_statement source: (string) @import)
-                (export_statement source: (string) @import)
-                (call_expression
-                  function: (identifier) @_fn
-                  arguments: (arguments . (string) @import)
-                  (#eq? @_fn "require"))
-                (call_expression
-                  function: (import)
-                  arguments: (arguments . (string) @import))"#
-            }
-            Language::Java => "(import_declaration (scoped_identifier) @import)",
         }
     }
 }

@@ -1,35 +1,23 @@
-//! Per-file extraction: symbols via tree-sitter-tags, dependency edges via a
-//! small per-language import query.
+//! Per-file extraction: symbols via tree-sitter-tags, plus behavioral facts from
+//! each definition's AST node.
 
-use std::ops::Range;
 use std::path::Path;
 
-use streaming_iterator::StreamingIterator;
-use tree_sitter::{Node, Parser, QueryCursor, Tree};
+use tree_sitter::{Node, Parser, Tree};
 use tree_sitter_tags::TagsContext;
 
 use crate::code::facts;
 use crate::code::lang::{self, Language};
-use crate::code::symbol::{DepEdge, Span, Symbol, SymbolKind, Visibility};
+use crate::code::symbol::{Span, Symbol, SymbolKind, Visibility};
 
-/// A reference whose enclosing definition has been resolved intra-file. `from`
-/// is the enclosing symbol's `qualified_name` (or the module path for top-level
-/// references); `name` is the referenced identifier, resolved to a target symbol
-/// globally in [`CodeIndex::build`]. Internal to the extractor.
-pub(crate) struct RawRef {
-    pub from: String,
-    pub name: String,
-}
-
-/// Extract symbols, dependency edges, and raw references from one file.
-/// Unparseable files and unsupported languages yield empty results rather than
-/// erroring.
-pub fn extract_file(path: &Path, repo_root: &Path) -> (Vec<Symbol>, Vec<DepEdge>, Vec<RawRef>) {
+/// Extract symbols from one file. Unparseable files and unsupported languages
+/// yield no symbols rather than erroring.
+pub fn extract_file(path: &Path, repo_root: &Path) -> Vec<Symbol> {
     let Some(language) = Language::from_path(path) else {
-        return (Vec::new(), Vec::new(), Vec::new());
+        return Vec::new();
     };
     let Ok(source) = std::fs::read(path) else {
-        return (Vec::new(), Vec::new(), Vec::new());
+        return Vec::new();
     };
     let module = lang::module_path(path, repo_root);
     let rel = path
@@ -37,14 +25,16 @@ pub fn extract_file(path: &Path, repo_root: &Path) -> (Vec<Symbol>, Vec<DepEdge>
         .unwrap_or(path)
         .to_string_lossy()
         .to_string();
-    // Parse the file once; the AST is shared by fact extraction and the
-    // import-edge query. (tree-sitter-tags does its own internal parse for the
-    // tag scan, which it doesn't expose, so that one we can't fold in.)
+    // tree-sitter-tags parses internally without exposing the tree, so parse
+    // once more for fact extraction.
     let tree = parse_tree(language, &source);
-    let root = tree.as_ref().map(|t| t.root_node());
-    let (symbols, refs) = symbols_and_refs(language, &source, &module, &rel, root);
-    let edges = import_edges(language, &source, &module, root);
-    (symbols, edges, refs)
+    symbols(
+        language,
+        &source,
+        &module,
+        &rel,
+        tree.as_ref().map(|t| t.root_node()),
+    )
 }
 
 /// Parse `source` into a syntax tree, or `None` if the language/parse fails.
@@ -54,50 +44,38 @@ fn parse_tree(language: Language, source: &[u8]) -> Option<Tree> {
     parser.parse(source, None)
 }
 
-fn symbols_and_refs(
+fn symbols(
     language: Language,
     source: &[u8],
     module: &str,
     rel: &str,
     root: Option<Node>,
-) -> (Vec<Symbol>, Vec<RawRef>) {
+) -> Vec<Symbol> {
     let Some(config) = language.tags_config_cached() else {
-        return (Vec::new(), Vec::new());
+        return Vec::new();
     };
     let mut ctx = TagsContext::new();
     let Ok((tags, _)) = ctx.generate_tags(config, source, None) else {
-        return (Vec::new(), Vec::new());
+        return Vec::new();
     };
 
     let text = String::from_utf8_lossy(source);
     let lines: Vec<&str> = text.lines().collect();
 
-    // The caller hands us the shared AST. Tags give byte ranges (`tag.range`)
-    // but not AST nodes; we resolve each definition's node by byte range below
-    // for behavioral facts and its full body span.
-
+    // Tags give byte ranges (`tag.range`) but not AST nodes; each definition's
+    // node is resolved by byte range below for behavioral facts and body span.
     let mut symbols = Vec::new();
-    // (full byte range of a definition, its qualified_name) for the innermost-
-    // enclosing lookup below. Definition ranges cover the body (the tag node is
-    // the whole `function_item`/`class` etc.), unlike `Tag.span` (name only).
-    let mut defs: Vec<(Range<usize>, String)> = Vec::new();
-    // (referenced name, byte position); enclosing symbol resolved after the loop.
-    let mut ref_sites: Vec<(String, usize)> = Vec::new();
-
     for tag in tags {
         let Ok(tag) = tag else { continue };
-        let name = String::from_utf8_lossy(&source[tag.name_range.clone()]).into_owned();
         if !tag.is_definition {
-            ref_sites.push((name, tag.name_range.start));
             continue;
         }
+        let name = String::from_utf8_lossy(&source[tag.name_range.clone()]).into_owned();
         let qualified_name = format!("{module}::{name}");
         let mut kind = map_kind(config.syntax_type_name(tag.syntax_type_id));
         let start_row = tag.span.start.row;
         let decl_line = lines.get(start_row).map(|l| l.trim().to_string());
         let visibility = classify_visibility(language, decl_line.as_deref().unwrap_or(""), &name);
-
-        defs.push((tag.range.clone(), qualified_name.clone()));
 
         let span = Span {
             path: rel.to_string(),
@@ -144,53 +122,7 @@ fn symbols_and_refs(
             facts: fact_data,
         });
     }
-
-    // tree-sitter-tags' JS/TS reference query captures call / `new` sites but not
-    // JSX element usage, so a component rendered only as `<LoginPage/>` looked
-    // like it had no callers (fan-in 0). Capture capitalized JSX element names as
-    // references too; lowercase names are intrinsic HTML elements, not symbols.
-    if matches!(language, Language::JavaScript | Language::Tsx) {
-        if let Some(node) = root {
-            collect_jsx_refs(node, source, &mut ref_sites);
-        }
-    }
-
-    // Source order keeps the resolved caller lists (and so the output) stable.
-    ref_sites.sort_by_key(|(_, pos)| *pos);
-
-    let refs = ref_sites
-        .into_iter()
-        .map(|(name, pos)| RawRef {
-            from: enclosing(&defs, pos).unwrap_or(module).to_string(),
-            name,
-        })
-        .collect();
-
-    (symbols, refs)
-}
-
-/// Recursively capture capitalized JSX element names (`<LoginPage/>`, `<Route>`)
-/// as reference sites. Component names are PascalCase; lowercase names are
-/// intrinsic HTML elements (`<div>`) and carry no symbol reference.
-fn collect_jsx_refs(node: Node, source: &[u8], out: &mut Vec<(String, usize)>) {
-    if matches!(
-        node.kind(),
-        "jsx_opening_element" | "jsx_self_closing_element"
-    ) {
-        if let Some(name) = node.child_by_field_name("name") {
-            if name.kind() == "identifier" {
-                if let Ok(text) = name.utf8_text(source) {
-                    if text.starts_with(|c: char| c.is_ascii_uppercase()) {
-                        out.push((text.to_string(), name.start_byte()));
-                    }
-                }
-            }
-        }
-    }
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        collect_jsx_refs(child, source, out);
-    }
+    symbols
 }
 
 /// Whether an AST node kind denotes a first-class enum definition (Rust
@@ -218,47 +150,6 @@ fn is_python_enum(node: tree_sitter::Node, source: &[u8]) -> bool {
         }
     }
     false
-}
-
-/// The innermost definition whose byte range contains `pos`. Among containing
-/// ranges the one with the largest `start` is the most deeply nested.
-fn enclosing(defs: &[(Range<usize>, String)], pos: usize) -> Option<&str> {
-    defs.iter()
-        .filter(|(r, _)| r.start <= pos && pos < r.end)
-        .max_by_key(|(r, _)| r.start)
-        .map(|(_, q)| q.as_str())
-}
-
-fn import_edges(
-    language: Language,
-    source: &[u8],
-    module: &str,
-    root: Option<Node>,
-) -> Vec<DepEdge> {
-    let Some(query) = language.import_query_compiled() else {
-        return Vec::new();
-    };
-    let Some(root) = root else {
-        return Vec::new();
-    };
-
-    let import_idx = query.capture_index_for_name("import");
-    let mut cursor = QueryCursor::new();
-    let mut matches = cursor.matches(query, root, source);
-    let mut edges = Vec::new();
-    while let Some(m) = matches.next() {
-        for cap in m.captures.iter().filter(|c| Some(c.index) == import_idx) {
-            let raw = cap.node.utf8_text(source).unwrap_or("");
-            let target = normalize_import(raw);
-            if !target.is_empty() {
-                edges.push(DepEdge {
-                    from_module: module.to_string(),
-                    to_module: target,
-                });
-            }
-        }
-    }
-    edges
 }
 
 fn map_kind(name: &str) -> SymbolKind {
@@ -320,39 +211,16 @@ fn classify_visibility(language: Language, decl_line: &str, name: &str) -> Visib
     }
 }
 
-fn normalize_import(raw: &str) -> String {
-    raw.trim()
-        .trim_matches(|c| c == '"' || c == '\'' || c == '`')
-        .to_string()
-}
-
-/// Test-only convenience wrappers that parse internally, so the unit tests can
-/// drive the workers from a raw source string. Production code parses once in
-/// [`extract_file`] and shares the tree.
+/// Test-only wrapper that parses internally, so unit tests can drive
+/// extraction from a raw source string.
 #[cfg(test)]
-fn extract_symbols_and_refs(
-    language: Language,
-    source: &[u8],
-    module: &str,
-    rel: &str,
-) -> (Vec<Symbol>, Vec<RawRef>) {
+fn extract_symbols(language: Language, source: &[u8], module: &str, rel: &str) -> Vec<Symbol> {
     let tree = parse_tree(language, source);
-    symbols_and_refs(
+    symbols(
         language,
         source,
         module,
         rel,
-        tree.as_ref().map(|t| t.root_node()),
-    )
-}
-
-#[cfg(test)]
-fn extract_edges(language: Language, source: &[u8], module: &str) -> Vec<DepEdge> {
-    let tree = parse_tree(language, source);
-    import_edges(
-        language,
-        source,
-        module,
         tree.as_ref().map(|t| t.root_node()),
     )
 }
@@ -365,112 +233,64 @@ mod tests {
         syms.iter().find(|s| s.name == name).map(|s| s.visibility)
     }
 
-    fn has_edge(edges: &[DepEdge], target_contains: &str) -> bool {
-        edges.iter().any(|e| e.to_module.contains(target_contains))
-    }
-
-    fn has_ref(refs: &[RawRef], from: &str, name: &str) -> bool {
-        refs.iter().any(|r| r.from == from && r.name == name)
-    }
-
     #[test]
-    fn rust_symbols_and_edges() {
-        let src = b"pub fn foo() {}\nfn bar() {}\nuse std::fmt;\n";
-        let (syms, _refs) = extract_symbols_and_refs(Language::Rust, src, "m", "m.rs");
-        assert_eq!(vis_of(&syms, "foo"), Some(Visibility::Public));
-        assert_eq!(vis_of(&syms, "bar"), Some(Visibility::Private));
-        let edges = extract_edges(Language::Rust, src, "m");
-        assert!(has_edge(&edges, "std::fmt"));
-    }
-
-    #[test]
-    fn jsx_element_usage_is_a_reference() {
-        // A component rendered only as `<LoginPage/>` must count as a caller, so
-        // its fan-in isn't falsely zero. Lowercase HTML tags are not references.
-        let src = b"function Routes() {\n  return <div><LoginPage /></div>;\n}\n";
-        let (_syms, refs) = extract_symbols_and_refs(Language::Tsx, src, "routes", "routes.tsx");
-        let names: Vec<&str> = refs.iter().map(|r| r.name.as_str()).collect();
-        assert!(
-            has_ref(&refs, "routes::Routes", "LoginPage"),
-            "JSX component usage not captured as a ref: {names:?}"
-        );
-        assert!(
-            !refs.iter().any(|r| r.name == "div"),
-            "lowercase HTML tag leaked as a ref"
-        );
-    }
-
-    #[test]
-    fn python_symbols_and_edges() {
-        let src = b"def foo():\n    pass\ndef _bar():\n    pass\nimport os\n";
-        let (syms, _refs) = extract_symbols_and_refs(Language::Python, src, "m", "m.py");
-        assert_eq!(vis_of(&syms, "foo"), Some(Visibility::Public));
-        assert_eq!(vis_of(&syms, "_bar"), Some(Visibility::Private));
-        let edges = extract_edges(Language::Python, src, "m");
-        assert!(has_edge(&edges, "os"));
-    }
-
-    #[test]
-    fn javascript_symbols_and_edges() {
-        let src = b"export function foo() {}\nfunction bar() {}\nimport x from \"./mod\";\n";
-        let (syms, _refs) = extract_symbols_and_refs(Language::JavaScript, src, "m", "m.js");
-        assert_eq!(vis_of(&syms, "foo"), Some(Visibility::Public));
-        assert_eq!(vis_of(&syms, "bar"), Some(Visibility::Internal));
-        let edges = extract_edges(Language::JavaScript, src, "m");
-        assert!(has_edge(&edges, "./mod"));
-    }
-
-    #[test]
-    fn typescript_symbols_and_edges() {
-        let src = b"export class A {}\nimport { x } from \"./mod\";\n";
-        let (syms, _refs) = extract_symbols_and_refs(Language::TypeScript, src, "m", "m.ts");
-        assert_eq!(vis_of(&syms, "A"), Some(Visibility::Public));
-        let edges = extract_edges(Language::TypeScript, src, "m");
-        assert!(has_edge(&edges, "./mod"));
-    }
-
-    #[test]
-    fn ts_reexports_require_and_dynamic_import_are_edges() {
-        let src = b"export { z } from \"./ui/z\";\nexport * from \"./all\";\n\
-            const a = require(\"./req\");\nconst b = import(\"./lazy\");\n\
-            foo(\"./not-an-import\");\n";
-        for lang in [Language::JavaScript, Language::TypeScript, Language::Tsx] {
-            let edges = extract_edges(lang, src, "m");
-            let got: Vec<&str> = edges.iter().map(|e| e.to_module.as_str()).collect();
-            assert_eq!(got, ["./ui/z", "./all", "./req", "./lazy"], "{lang:?}");
+    fn visibility_per_language() {
+        let cases: [(Language, &[u8], &str, Visibility); 7] = [
+            (
+                Language::Rust,
+                b"pub fn foo() {}",
+                "foo",
+                Visibility::Public,
+            ),
+            (Language::Rust, b"fn bar() {}", "bar", Visibility::Private),
+            (
+                Language::Python,
+                b"def foo():\n    pass\n",
+                "foo",
+                Visibility::Public,
+            ),
+            (
+                Language::Python,
+                b"def _bar():\n    pass\n",
+                "_bar",
+                Visibility::Private,
+            ),
+            (
+                Language::JavaScript,
+                b"export function foo() {}",
+                "foo",
+                Visibility::Public,
+            ),
+            (
+                Language::JavaScript,
+                b"function bar() {}",
+                "bar",
+                Visibility::Internal,
+            ),
+            (
+                Language::TypeScript,
+                b"export class A {}",
+                "A",
+                Visibility::Public,
+            ),
+        ];
+        for (lang, src, name, want) in cases {
+            let syms = extract_symbols(lang, src, "m", "m");
+            assert_eq!(vis_of(&syms, name), Some(want), "{lang:?} {name}");
         }
-    }
-
-    #[test]
-    fn java_symbols_and_edges() {
-        let src = b"import a.b.C;\npublic class A {\n  public void m() {}\n}\n";
-        let (syms, _refs) = extract_symbols_and_refs(Language::Java, src, "m", "m.java");
-        assert_eq!(vis_of(&syms, "A"), Some(Visibility::Public));
-        let edges = extract_edges(Language::Java, src, "m");
-        assert!(has_edge(&edges, "a.b.C"));
-    }
-
-    #[test]
-    fn call_resolves_to_enclosing_caller() {
-        // `foo`'s body calls `bar` -> a reference from `m::foo` named `bar`.
-        let src = b"fn bar() {}\nfn foo() {\n    bar();\n}\n";
-        let (_syms, refs) = extract_symbols_and_refs(Language::Rust, src, "m", "m.rs");
-        assert!(has_ref(&refs, "m::foo", "bar"));
-    }
-
-    #[test]
-    fn recursive_call_is_kept_as_self_ref_site() {
-        // The self-call is captured with from == name; the self-edge is dropped
-        // later, globally, in `resolve_refs`.
-        let src = b"fn foo() {\n    foo();\n}\n";
-        let (_syms, refs) = extract_symbols_and_refs(Language::Rust, src, "m", "m.rs");
-        assert!(has_ref(&refs, "m::foo", "foo"));
+        let java = extract_symbols(
+            Language::Java,
+            b"public class A {\n  public void m() {}\n}\n",
+            "m",
+            "m.java",
+        );
+        assert_eq!(vis_of(&java, "A"), Some(Visibility::Public));
     }
 
     #[test]
     fn rust_enum_is_an_enum() {
         let src = b"pub enum State {\n    Idle,\n    Running,\n    Done,\n}\n";
-        let (syms, _refs) = extract_symbols_and_refs(Language::Rust, src, "m", "m.rs");
+        let syms = extract_symbols(Language::Rust, src, "m", "m.rs");
         let en = syms.iter().find(|s| s.name == "State").unwrap();
         assert_eq!(en.kind, SymbolKind::Enum);
     }
@@ -479,7 +299,7 @@ mod tests {
     fn python_class_enum_is_an_enum() {
         let src = b"from enum import Enum\n\
                     class State(Enum):\n    IDLE = 1\n    RUNNING = 2\n    DONE = 3\n";
-        let (syms, _refs) = extract_symbols_and_refs(Language::Python, src, "m", "m.py");
+        let syms = extract_symbols(Language::Python, src, "m", "m.py");
         let en = syms.iter().find(|s| s.name == "State").unwrap();
         assert_eq!(en.kind, SymbolKind::Enum);
     }
@@ -487,16 +307,8 @@ mod tests {
     #[test]
     fn python_plain_class_is_not_an_enum() {
         let src = b"class Plain:\n    X = 1\n    def m(self):\n        pass\n";
-        let (syms, _refs) = extract_symbols_and_refs(Language::Python, src, "m", "m.py");
+        let syms = extract_symbols(Language::Python, src, "m", "m.py");
         let cls = syms.iter().find(|s| s.name == "Plain").unwrap();
         assert_ne!(cls.kind, SymbolKind::Enum);
-    }
-
-    #[test]
-    fn top_level_reference_falls_back_to_module() {
-        // A call outside any definition has the module path as its `from`.
-        let src = b"fn foo() {}\nconst N: usize = foo();\n";
-        let (_syms, refs) = extract_symbols_and_refs(Language::Rust, src, "m", "m.rs");
-        assert!(refs.iter().any(|r| r.name == "foo" && r.from == "m"));
     }
 }

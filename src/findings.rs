@@ -16,7 +16,7 @@ use crate::claim::Provenance;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Deserialize, clap::ValueEnum)]
 #[serde(rename_all = "lowercase")]
 pub enum Severity {
-    /// Advisory; high-volume (e.g. undocumented surface). Off by gating thresholds.
+    /// Advisory. No check emits notes today; kept so `--min-severity note` stays valid.
     Note,
     /// Couldn't be confirmed either way.
     Warning,
@@ -44,8 +44,6 @@ pub enum Verdict {
     Stale,
     /// could not gather evidence either way
     Unverifiable,
-    /// public code surface that no doc references (code -> doc gap)
-    Undocumented,
     /// claim backed by code (not reported by default)
     Supported,
 }
@@ -56,7 +54,6 @@ impl Verdict {
             Verdict::Contradicted => "contradicted",
             Verdict::Stale => "stale",
             Verdict::Unverifiable => "unverifiable",
-            Verdict::Undocumented => "undocumented",
             Verdict::Supported => "supported",
         }
     }
@@ -74,7 +71,6 @@ impl Verdict {
         match self {
             Verdict::Contradicted | Verdict::Stale => Severity::Error,
             Verdict::Unverifiable => Severity::Warning,
-            Verdict::Undocumented => Severity::Note,
             Verdict::Supported => Severity::Note,
         }
     }

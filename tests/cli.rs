@@ -63,41 +63,25 @@ fn version_reports_binary_name() {
 }
 
 #[test]
-fn index_emits_json_symbols() {
-    let fx = Fixture::new(&[("lib.rs", "pub fn greet() {}\n")]);
-    let out = fx.run(&["index", "--format", "json"]);
-    assert!(out.status.success(), "index should exit 0");
-    let stdout = String::from_utf8_lossy(&out.stdout);
-    let json: serde_json::Value =
-        serde_json::from_str(&stdout).expect("index output is valid JSON");
-    let names: Vec<&str> = json["symbols"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .filter_map(|s| s["name"].as_str())
-        .collect();
-    assert!(names.contains(&"greet"), "expected `greet` in {names:?}");
-}
-
-#[test]
-fn check_flags_undocumented_public_symbol() {
-    // `helper` is public and documented nowhere with no internal callers, a
-    // coverage gap Layer 1 should surface. It is `note`-level, so it is hidden by
-    // the default `warning` threshold; `--min-severity note` opts it back in.
+fn stale_path_suggests_the_moved_file() {
     let fx = Fixture::new(&[
-        ("lib.rs", "pub fn greet() {}\npub fn helper() {}\n"),
-        ("README.md", "# Demo\n\n`greet` greets the user.\n"),
+        ("pkg/helpers.rs", "pub fn greet() {}\n"),
+        ("README.md", "# Demo\n\nSee `src/helpers.rs`.\n"),
     ]);
-    let out = fx.run(&["check", "--format", "json", "--min-severity", "note"]);
+    let out = fx.run(&["check", "--format", "json"]);
     let stdout = String::from_utf8_lossy(&out.stdout);
-    let json: serde_json::Value =
-        serde_json::from_str(&stdout).expect("check output is valid JSON");
-    let findings = json["findings"].as_array().expect("findings array");
+    let json: serde_json::Value = serde_json::from_str(&stdout).expect("valid JSON");
+    let details: Vec<&str> = json["findings"]
+        .as_array()
+        .expect("findings array")
+        .iter()
+        .filter_map(|f| f["detail"].as_str())
+        .collect();
     assert!(
-        findings
+        details
             .iter()
-            .any(|f| f["claim"].as_str().unwrap_or("").contains("helper")),
-        "expected a finding about `helper`, got: {stdout}"
+            .any(|d| d.contains("src/helpers.rs") && d.ends_with("Did you mean `pkg/helpers.rs`?")),
+        "{details:?}"
     );
 }
 

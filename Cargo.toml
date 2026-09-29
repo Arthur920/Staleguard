@@ -21,10 +21,7 @@ regex = "1"
 # Per-file parsing in `CodeIndex::build` is embarrassingly parallel (each file
 # gets its own tree-sitter parser); rayon fans it across cores.
 rayon = "1"
-# `rc` lets `Arc<str>` serialize as its string: `RefEdge` interns its endpoints
-# into shared `Arc<str>`s so a large repo's reference graph doesn't duplicate
-# every long qualified name across millions of edges (the litellm OOM).
-serde = { version = "1", features = ["derive", "rc"] }
+serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # Optional `.staleguard.toml` config (exclude globs, verdict suppression).
 toml = { version = "0.8", default-features = false, features = ["parse"] }
@@ -35,7 +32,6 @@ tree-sitter-python = "0.25.0"
 tree-sitter-javascript = "0.25.0"
 tree-sitter-typescript = "0.23.2"
 tree-sitter-java = "0.23.5"
-streaming-iterator = "0.1.9"
 
 [profile.release]
 strip = true

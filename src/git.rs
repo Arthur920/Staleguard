@@ -184,36 +184,6 @@ fn overlaps(a0: usize, a1: usize, b0: usize, b1: usize) -> bool {
     a0 <= b1 && b0 <= a1
 }
 
-/// Per-commit file sets from history (newest first), capped at `max_commits`.
-/// Used to mine change-coupling. Empty when git is unavailable.
-pub fn file_change_history(root: &Path, max_commits: usize) -> Vec<Vec<String>> {
-    // \x1e (record sep) marks a commit boundary, then the file list follows.
-    let cap = format!("-{max_commits}");
-    let Some(text) = git(
-        root,
-        &["log", &cap, "--name-only", "--pretty=format:\x1e%H"],
-    ) else {
-        return Vec::new();
-    };
-    let mut commits = Vec::new();
-    let mut current: Vec<String> = Vec::new();
-    let mut started = false;
-    for line in text.lines() {
-        if let Some(_sha) = line.strip_prefix('\x1e') {
-            if started {
-                commits.push(std::mem::take(&mut current));
-            }
-            started = true;
-        } else if !line.trim().is_empty() {
-            current.push(line.trim().to_string());
-        }
-    }
-    if started {
-        commits.push(current);
-    }
-    commits
-}
-
 /// `old → new` for every file rename in the last 2000 commits. Newest wins
 /// when a path was renamed more than once.
 pub fn renames(root: &Path) -> HashMap<String, String> {

@@ -126,10 +126,7 @@ fn path_claims_bucket_to_their_module_or_path() {
         doc: None,
         facts: Facts::default(),
     };
-    let index = CodeIndex {
-        symbols: vec![sym],
-        ..Default::default()
-    };
+    let index = CodeIndex { symbols: vec![sym] };
     // A code-file path resolves to its module, even when named by suffix only.
     assert_eq!(
         claim_modules(&Provenance::path("foo.rs"), &index),
@@ -173,10 +170,7 @@ fn behavioral_drift_flag_fires_when_ledger_hash_is_stale() {
     };
     let current_hash = facts::facts_hash(&sym.facts);
     assert_ne!(current_hash, 0);
-    let index = CodeIndex {
-        symbols: vec![sym],
-        ..Default::default()
-    };
+    let index = CodeIndex { symbols: vec![sym] };
 
     // A claim anchored to that symbol.
     let f = Finding::supported("calls `foo`", "doc.md:1", Provenance::symbol("m::foo"));
@@ -212,19 +206,6 @@ fn behavioral_drift_flag_fires_when_ledger_hash_is_stale() {
         "{:?}",
         out.findings
     );
-}
-
-#[test]
-fn coverage_undocumented_gap_lowers_its_module_score() {
-    // A4 score integration: an Undocumented coverage gap is a scored claim. One
-    // supported + one undocumented in module `m` => credit 1 / total 2.
-    let scored = vec![
-        (Verdict::Supported, vec!["m".to_string()]),
-        (Verdict::Undocumented, vec!["m".to_string()]),
-    ];
-    let s = compute_score(&scored, "");
-    assert!((s.repo - 0.5).abs() < 1e-9, "{}", s.repo);
-    assert!((s.per_module["m"] - 0.5).abs() < 1e-9);
 }
 
 #[test]

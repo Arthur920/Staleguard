@@ -62,10 +62,6 @@ fn rule_descriptors() -> Value {
             Verdict::Unverifiable,
             "A doc claim could not be confirmed or refuted from the code.",
         ),
-        (
-            Verdict::Undocumented,
-            "Public code surface that no doc describes (code -> doc gap).",
-        ),
     ];
     Value::Array(
         rules
@@ -141,6 +137,6 @@ mod tests {
         assert_eq!(sarif["version"], "2.1.0");
         assert!(sarif["runs"][0]["tool"]["driver"]["rules"]
             .as_array()
-            .is_some_and(|r| r.len() == 4));
+            .is_some_and(|r| r.len() == 3));
     }
 }

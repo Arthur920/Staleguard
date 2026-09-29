@@ -1,6 +1,6 @@
 name: Staleguard
 description: >-
-  Catch documentation drift, fail CI when your docs claim things the code doesnt do. Zero false positives.
+  Catch documentation drift, fail CI when your docs claim things the code doesnt do. Deterministic, no model or network.
 branding:
   icon: check-circle
   color: blue

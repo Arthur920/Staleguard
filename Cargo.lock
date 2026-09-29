@@ -350,7 +350,6 @@ dependencies = [
  "regex",
  "serde",
  "serde_json",
- "streaming-iterator",
  "toml",
  "tree-sitter",
  "tree-sitter-java",

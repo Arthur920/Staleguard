@@ -5,7 +5,6 @@
 //! either human `text` or machine `json`, so the command dispatch in `main.rs`
 //! stays argument-parsing plus a render call.
 
-use crate::code::CodeIndex;
 use crate::drift;
 use crate::findings::Finding;
 
@@ -17,22 +16,8 @@ use clap::ValueEnum;
 pub enum Format {
     Text,
     Json,
-    /// SARIF 2.1.0: supported by `check`; other commands fall back to `json`
-    /// with a note on stderr.
+    /// SARIF 2.1.0, for GitHub code scanning.
     Sarif,
-}
-
-/// SARIF only maps onto findings (`check`/`coverage`). For the structural
-/// commands (`rules`, `index`) downgrade it to `json` with a one-line note, so
-/// a blanket `--format sarif` in CI still produces machine-readable output.
-fn downgrade_sarif(format: Format, command: &str) -> Format {
-    if format == Format::Sarif {
-        eprintln!(
-            "note: `--format sarif` is only meaningful for findings; emitting json for `{command}`."
-        );
-        return Format::Json;
-    }
-    format
 }
 
 pub(crate) fn report(findings: &[Finding], format: Format) {
@@ -88,48 +73,6 @@ pub(crate) fn report_check(out: &drift::Outcome, format: Format) {
             if let Some((base, head)) = out.regression {
                 println!("\u{2717} score regressed: {base:.3} (base) -> {head:.3} (head)");
             }
-        }
-    }
-}
-
-pub(crate) fn report_index(index: &CodeIndex, format: Format) {
-    let format = downgrade_sarif(format, "index");
-    match format {
-        Format::Sarif => unreachable!(),
-        Format::Json => {
-            println!("{}", serde_json::to_string_pretty(index).unwrap());
-        }
-        Format::Text => {
-            for s in &index.symbols {
-                println!(
-                    "[{:?}/{:?}] {} ({}:{})",
-                    s.kind, s.visibility, s.qualified_name, s.span.path, s.span.start_line
-                );
-            }
-            for e in &index.edges {
-                println!("edge  {} -> {}", e.from_module, e.to_module);
-            }
-            for e in &index.module_edges {
-                println!("mod-edge  {} -> {}", e.from_module, e.to_module);
-            }
-            // Flatten + sort the target-keyed caller map so the dump is
-            // deterministic regardless of `HashMap` iteration order.
-            let mut ref_edges: Vec<(&str, &str)> = index
-                .ref_callers
-                .iter()
-                .flat_map(|(to, froms)| froms.iter().map(move |from| (from.as_ref(), to.as_ref())))
-                .collect();
-            ref_edges.sort_unstable();
-            for (from, to) in &ref_edges {
-                println!("ref-edge  {from} -> {to}");
-            }
-            println!(
-                "\n{} symbol(s), {} edge(s), {} mod-edge(s), {} ref-edge(s)",
-                index.symbols.len(),
-                index.edges.len(),
-                index.module_edges.len(),
-                ref_edges.len()
-            );
         }
     }
 }

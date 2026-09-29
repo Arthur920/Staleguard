@@ -13,12 +13,11 @@
 //!
 //! # Verdict categories to drop from the report (and from the failing set), for
 //! # teams that opt out of a whole class of finding. One or more of:
-//! # "contradicted", "stale", "unverifiable", "undocumented".
-//! suppress = ["undocumented"]
+//! # "contradicted", "stale", "unverifiable".
+//! suppress = ["unverifiable"]
 //!
 //! # Drop findings below this severity from the report, SARIF, and failing set.
-//! # "note" (default, keep all) < "warning" < "error". The `--min-severity`
-//! # flag overrides this. `warning` hides the high-volume `undocumented` notes.
+//! # "note" < "warning" < "error". The `--min-severity` flag overrides this.
 //! min_severity = "warning"
 //! ```
 
@@ -72,7 +71,6 @@ impl Settings {
                 "contradicted" => Some(Verdict::Contradicted),
                 "stale" => Some(Verdict::Stale),
                 "unverifiable" => Some(Verdict::Unverifiable),
-                "undocumented" => Some(Verdict::Undocumented),
                 _ => None,
             })
             .collect()
@@ -185,39 +183,37 @@ mod tests {
     fn suppression_drops_named_verdicts_but_keeps_supported() {
         let s = Settings {
             exclude: vec![],
-            suppress: vec!["undocumented".into()],
+            suppress: vec!["unverifiable".into()],
             min_severity: None,
         };
         let mut findings = vec![
-            Finding::problem(Verdict::Undocumented, "c", "a.rs", "d"),
+            Finding::problem(Verdict::Unverifiable, "c", "a.rs", "d"),
             Finding::problem(Verdict::Stale, "c", "README.md:1", "d"),
             Finding::supported("c", "README.md:2", Provenance::default()),
         ];
         s.apply_suppression(&mut findings);
         assert_eq!(findings.len(), 2);
-        assert!(findings.iter().all(|f| f.verdict != Verdict::Undocumented));
+        assert!(findings.iter().all(|f| f.verdict != Verdict::Unverifiable));
         assert!(findings.iter().any(|f| f.verdict == Verdict::Supported));
     }
 
     #[test]
     fn severity_threshold_drops_below_but_keeps_supported() {
         let mut findings = vec![
-            Finding::problem(Verdict::Undocumented, "c", "a.rs", "d"), // note
             Finding::problem(Verdict::Unverifiable, "c", "b.md:1", "d"), // warning
-            Finding::problem(Verdict::Stale, "c", "c.md:1", "d"),      // error
+            Finding::problem(Verdict::Stale, "c", "c.md:1", "d"),        // error
             Finding::supported("c", "d.md:2", Provenance::default()),
         ];
-        Settings::apply_severity_threshold(&mut findings, Some(Severity::Warning));
-        // Note-level undocumented dropped; warning + error kept; supported kept.
-        assert!(findings.iter().all(|f| f.verdict != Verdict::Undocumented));
-        assert!(findings.iter().any(|f| f.verdict == Verdict::Unverifiable));
+        Settings::apply_severity_threshold(&mut findings, Some(Severity::Error));
+        // Warning dropped; error kept; supported kept.
+        assert!(findings.iter().all(|f| f.verdict != Verdict::Unverifiable));
         assert!(findings.iter().any(|f| f.verdict == Verdict::Stale));
         assert!(findings.iter().any(|f| f.verdict == Verdict::Supported));
     }
 
     #[test]
     fn no_threshold_is_a_noop() {
-        let mut findings = vec![Finding::problem(Verdict::Undocumented, "c", "a.rs", "d")];
+        let mut findings = vec![Finding::problem(Verdict::Unverifiable, "c", "a.rs", "d")];
         Settings::apply_severity_threshold(&mut findings, None);
         assert_eq!(findings.len(), 1);
     }

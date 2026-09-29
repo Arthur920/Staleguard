@@ -9,7 +9,7 @@
   <a href="https://github.com/Arthur920/Staleguard/releases"><img src="https://img.shields.io/github/v/release/Arthur920/Staleguard?sort=semver&color=blue" alt="Release"></a>
   <a href="LICENSE"><img src="https://img.shields.io/github/license/Arthur920/Staleguard?color=green" alt="License: MIT"></a>
   <img src="https://img.shields.io/badge/rust-2021-orange?logo=rust" alt="Rust 2021">
-  <img src="https://img.shields.io/badge/analyzes-Rust%20%7C%20Python%20%7C%20JS%20%7C%20TS%20%7C%20Java-informational" alt="Languages analyzed">
+  <img src="https://img.shields.io/badge/tuned%20for-TypeScript%20%7C%20JavaScript-informational" alt="Tuned for TypeScript and JavaScript">
 </p>
 
 Staleguard catches **documentation drift**: places where your READMEs, `CLAUDE.md`,
@@ -17,12 +17,11 @@ and `*.md` / `*.mdx` docs claim something the code no longer backs up. It checks
 against the actual codebase and reports what's stale, wrong, or missing.
 
 Everything runs locally and offline. It is **deterministic** (no model, no API) and
-tuned for **zero false positives**. Every finding points at a concrete path,
-command, env var, flag, or symbol that the docs got wrong.
+tuned to under-report rather than false-alarm: every finding names a concrete
+path, command, env var, flag, or symbol that doesn't exist in the code.
 
-Findings cover broken references (paths, commands, env vars, flags, code
-symbols) and undocumented public surface. A CI alignment score tracks drift
-over time.
+Findings cover broken references: paths, commands, env vars, flags, and code
+symbols. A CI alignment score tracks drift over time.
 [DETAILS.md](DETAILS.md) has the full breakdown.
 
 <p align="center">
@@ -36,7 +35,7 @@ symbols named in your docs against the real codebase and reports only what it
 can prove wrong. Where it can, a finding says what the docs probably meant:
 ``Did you mean `src/api/client.ts`?`` from git rename history, or the closest
 defined script or identifier. It is fully deterministic (no models, no network) and runs in
-~1.2s on a 330k-line repo.
+~1.2s on a mid-size TypeScript monorepo.
 
 ## Install
 
@@ -95,20 +94,15 @@ scanning** tab, emit SARIF and upload it:
   id: staleguard
   with:
     format: sarif
-    args: --min-severity warning   # the default: provable drift only (see below)
 - uses: github/codeql-action/upload-sarif@v3
   if: always()
   with:
     sarif_file: ${{ steps.staleguard.outputs.sarif-file }}
 ```
 
-**Severity and default output.** A fresh scan of a large repo reports a
-lot of `undocumented` findings (public surface no doc mentions); those are
-`note`-level and advisory. The default threshold is `--min-severity warning`,
-which drops them and keeps only provable drift: broken references and
-contradictions. Severity ranks `note` < `warning` < `error`; raise to
-`--min-severity error` for the strictest gate, or pass `--min-severity note` for
-the full coverage report including the undocumented surface.
+**Severity.** Broken references and contradictions are `error`; claims that
+couldn't be confirmed either way are `warning`. Pass `--min-severity error` for
+the strictest gate.
 
 Action inputs: `args`, `format` (`text`/`json`/`sarif`), `version`, and
 `working-directory`. Or call the binary directly:
@@ -142,18 +136,16 @@ Drop a `.staleguard.toml` at the repo root to tune a run (all keys optional):
 exclude = ["docs/legacy/**", "vendor/**", "NOTES.md"]
 
 # Verdict categories to drop from the report and the failing set. One or more of:
-# "contradicted", "stale", "unverifiable", "undocumented".
-suppress = ["undocumented"]
+# "contradicted", "stale", "unverifiable".
+suppress = ["unverifiable"]
 
 # Drop everything below this severity (note < warning < error). Same effect as
-# `--min-severity`, which overrides it. Defaults to `warning` (hides the
-# undocumented notes); set `note` to keep the full coverage report.
-min_severity = "warning"
+# `--min-severity`, which overrides it.
+min_severity = "error"
 ```
 
 Both suppression and the severity threshold affect the alignment score:
-filtered-out claims (e.g. the `undocumented` notes hidden by the default
-`warning`) drop out of the denominator, while `Supported` claims are always kept.
+filtered-out claims drop out of the denominator, while `Supported` claims are always kept.
 So a stricter threshold or more suppression reports a higher score over the
 claims that remain. The score describes what you chose to check, not the whole
 repo.

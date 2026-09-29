@@ -17,9 +17,13 @@ into the repo's own packages.
 - env vars and CLI flags documented but never read in the code
 - qualified code refs (`module::symbol`, `Type.method`) that resolve to no symbol
 
-**Coverage gaps**
-- public code surface that no doc describes, risk-ranked by fan-in, churn, and
-  complexity
+Where it can, a stale finding ends with a hint: ``Did you mean `…`?``, from the
+file's git rename, the one tracked file with the same name, or the closest
+defined script or identifier.
+
+Paths, commands, and env vars are checked the same way in any repo. Symbol
+grounding parses TypeScript/JavaScript (the tuned target) plus Rust, Python,
+and Java on a best-effort basis.
 
 **Drift over time**
 - `--diff <ref>` re-checks only what changed since a git ref
@@ -38,10 +42,7 @@ alignment, and gates CI on regressions.
 staleguard check                 # full repo
 staleguard check --diff main     # only what changed vs main
 staleguard check --format json   # machine-readable findings
-staleguard check --doc README.md # restrict to one doc (cheaper)
-
-staleguard index                 # code symbols + module/reference edges (tree-sitter)
-staleguard coverage              # public code surface that no doc describes
+staleguard check --doc README.md # restrict to one doc
 ```
 
 Output is `text` (human) or `json` (machine-readable). `check` exits non-zero on
@@ -49,11 +50,9 @@ any reportable finding or a score regression, so it drops into CI as is.
 
 ## Performance and footprint
 
-- Staleguard scans a ~330k-line repo (1,363 source
-  files) in **~1.2s** for a full `check` (~0.7s warm) and **under a second**
-  for `index`, at ~100 MB peak memory. Per-file parsing runs in parallel
-  (rayon) and tree-sitter queries are compiled once and cached, so throughput
-  scales with cores.
+- A full `check` of a mid-size TypeScript monorepo takes **~1.2s**. Per-file
+  parsing runs in parallel (rayon) and tree-sitter queries are compiled once
+  and cached, so throughput scales with cores.
 - Nothing leaves the machine: no models, no network access.
 
 ## About this project

@@ -6,7 +6,6 @@
 //! Degrades safely: with no git or no baseline every claim is treated as dirty
 //! (a full scan), so the layer never suppresses a real finding.
 
-pub mod coupling;
 pub mod ledger;
 
 use std::collections::{BTreeMap, HashSet};
@@ -29,7 +28,6 @@ fn weight(v: Verdict) -> (f64, f64) {
         Verdict::Supported => (1.0, 1.0),
         Verdict::Contradicted => (0.0, 3.0),
         Verdict::Stale => (0.0, 2.0),
-        Verdict::Undocumented => (0.0, 1.0),
         Verdict::Unverifiable => (0.0, 0.0),
     }
 }
