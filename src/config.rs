@@ -196,11 +196,22 @@ fn capitalize_join(segments: &[&str], lower_first: bool) -> String {
 fn env_var_claims(markdown: &str) -> Vec<(usize, String)> {
     let mut out = Vec::new();
     let mut in_fence = false;
+    // `$NAME` only reads as an env var in prose or a shell-like block; in a
+    // JS/TS block `${NAME}` is template-literal interpolation of a local.
+    let mut shell_fence = false;
     for (i, line) in markdown.lines().enumerate() {
         let lineno = i + 1;
         let trimmed = line.trim_start();
         if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
             in_fence = !in_fence;
+            let lang = trimmed
+                .trim_start_matches(['`', '~'])
+                .trim()
+                .to_ascii_lowercase();
+            shell_fence = in_fence && SHELL_FENCES.contains(&lang.as_str());
+            continue;
+        }
+        if in_fence && !shell_fence {
             continue;
         }
         for cap in dollar_env_re().captures_iter(line) {
@@ -287,6 +298,30 @@ fn inline_code_re() -> &'static Regex {
 }
 
 /// `$NAME` or `${NAME}` (name starts with a letter/underscore, length ≥ 2).
+/// Code-fence languages whose `$NAME` / `${NAME}` is an env var (an unlabeled
+/// fence is usually a shell command).
+const SHELL_FENCES: &[&str] = &[
+    "",
+    "sh",
+    "bash",
+    "shell",
+    "zsh",
+    "fish",
+    "console",
+    "env",
+    "dotenv",
+    "dockerfile",
+    "docker",
+    "yaml",
+    "yml",
+    "ini",
+    "toml",
+    "make",
+    "makefile",
+    "powershell",
+    "ps1",
+];
+
 fn dollar_env_re() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| Regex::new(r"\$\{?([A-Za-z_][A-Za-z0-9_]+)\}?").unwrap())
@@ -339,6 +374,14 @@ mod tests {
             .collect();
         assert!(flagged.iter().any(|d| d.contains("REDIS_URL")));
         assert!(!flagged.iter().any(|d| d.contains("DATABASE_URL")));
+    }
+
+    #[test]
+    fn template_literal_in_js_block_is_not_an_env_var() {
+        let md = "```ts\nconst s = `max-age=${ONE_DAY_SECONDS}`;\n```\n\
+                  ```sh\nexport X=1 && run --token $API_TOKEN\n```\n";
+        let names: Vec<String> = env_var_claims(md).into_iter().map(|(_, n)| n).collect();
+        assert_eq!(names, ["API_TOKEN"]);
     }
 
     #[test]

@@ -7,8 +7,9 @@
 //! only means "re-check more," never "miss a check".
 
 use std::collections::HashSet;
+use std::io::Write;
 use std::path::Path;
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 use crate::code::CodeIndex;
 
@@ -25,6 +26,37 @@ fn git(root: &Path, args: &[&str]) -> Option<String> {
         return None;
     }
     String::from_utf8(out.stdout).ok()
+}
+
+/// The subset of `paths` (repo-relative) that `.gitignore` rules exclude.
+/// Empty outside a git repo or when git is absent.
+pub fn ignored(root: &Path, paths: &[String]) -> HashSet<String> {
+    if paths.is_empty() {
+        return HashSet::new();
+    }
+    let Ok(mut child) = Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .args(["check-ignore", "--no-index", "--stdin"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+    else {
+        return HashSet::new();
+    };
+    if let Some(mut stdin) = child.stdin.take() {
+        let _ = stdin.write_all(paths.join("\n").as_bytes());
+    }
+    child
+        .wait_with_output()
+        .map(|o| {
+            String::from_utf8_lossy(&o.stdout)
+                .lines()
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 /// `true` if `root` is inside a git work tree.

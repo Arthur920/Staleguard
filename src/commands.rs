@@ -22,6 +22,9 @@ use crate::findings::{Finding, Verdict};
 #[derive(Debug, Default, Clone)]
 pub struct Manifests {
     npm_scripts: Option<HashSet<String>>,
+    /// Dependency names from the nearest and the root `package.json`: `pnpm tsx`
+    /// / `yarn vitest` run a dependency's binary, not a script.
+    npm_dep_bins: HashSet<String>,
     make_targets: Option<HashSet<String>>,
     cargo_bins: Option<HashSet<String>>,
     /// Names by which *this* project's own CLI is invoked (cargo bins + npm
@@ -45,7 +48,12 @@ impl Manifests {
     /// command in a sub-project's docs that hit a sibling manifest was a false
     /// "target does not exist" finding.
     pub fn load_nearest(start: &Path, root: &Path) -> Manifests {
-        let npm = find_up(start, root, &["package.json"]).and_then(|d| load_package_json(&d));
+        let npm_dir = find_up(start, root, &["package.json"]);
+        let npm = npm_dir.as_deref().and_then(load_package_json);
+        let mut npm_dep_bins = HashSet::new();
+        for dir in npm_dir.iter().map(|d| d.as_path()).chain([root]) {
+            npm_dep_bins.extend(load_dependency_names(dir));
+        }
         let cargo_bins = find_up(start, root, &["Cargo.toml"]).and_then(|d| load_cargo_bins(&d));
         let make_targets = find_up(start, root, &["Makefile", "makefile", "GNUmakefile"])
             .and_then(|d| load_make_targets(&d));
@@ -60,6 +68,7 @@ impl Manifests {
 
         Manifests {
             npm_scripts: npm.map(|(scripts, _)| scripts),
+            npm_dep_bins,
             make_targets,
             cargo_bins,
             project_bins,
@@ -124,6 +133,35 @@ fn load_package_json(root: &Path) -> Option<(HashSet<String>, HashSet<String>)> 
     }
 
     Some((scripts, bins))
+}
+
+/// Names a dependency's binary is likely invoked by: every `dependencies` /
+/// `devDependencies` key, plus the unscoped tail of a scoped one
+/// (`@biomejs/biome` -> `biome`).
+// ponytail: guesses bin names from package names rather than reading each
+// installed package's `bin`; covers tsx/vitest/prisma/eslint-style tools.
+fn load_dependency_names(dir: &Path) -> HashSet<String> {
+    let Some(json) = std::fs::read_to_string(dir.join("package.json"))
+        .ok()
+        .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
+    else {
+        return HashSet::new();
+    };
+    let mut out = HashSet::new();
+    for key in ["dependencies", "devDependencies"] {
+        for name in json
+            .get(key)
+            .and_then(|d| d.as_object())
+            .into_iter()
+            .flat_map(|d| d.keys())
+        {
+            out.insert(name.clone());
+            if let Some((_, tail)) = name.rsplit_once('/') {
+                out.insert(tail.to_string());
+            }
+        }
+    }
+    out
 }
 
 /// GNU-make target names: the labels left of `:` on rule lines (skipping
@@ -257,6 +295,8 @@ fn push_subcommands(raw: &str, lineno: usize, out: &mut Vec<(usize, String)>) {
 /// What kind of registry a parsed command resolves against.
 enum Target<'a> {
     NpmScript(&'a str),
+    /// `pnpm x` / `yarn x`: a script, or else a dependency's binary.
+    RunnerScript(&'a str),
     Make(&'a str),
     CargoBin(&'a str),
 }
@@ -273,7 +313,9 @@ pub fn check(markdown: &str, doc_path: &str, m: &Manifests) -> Vec<Finding> {
             continue;
         };
         let (kind, name, registry, manifest) = match target {
-            Target::NpmScript(n) => ("script", n, m.npm_scripts.as_ref(), "package.json"),
+            Target::NpmScript(n) | Target::RunnerScript(n) => {
+                ("script", n, m.npm_scripts.as_ref(), "package.json")
+            }
             Target::Make(n) => ("make target", n, m.make_targets.as_ref(), "Makefile"),
             Target::CargoBin(n) => ("cargo binary", n, m.cargo_bins.as_ref(), "Cargo.toml"),
         };
@@ -281,7 +323,8 @@ pub fn check(markdown: &str, doc_path: &str, m: &Manifests) -> Vec<Finding> {
         let Some(registry) = registry else { continue };
         let doc_ref = format!("{doc_path}:{line}");
         let prov = Provenance::path(manifest);
-        if registry.contains(name) {
+        let dep_bin = matches!(target, Target::RunnerScript(_)) && m.npm_dep_bins.contains(name);
+        if registry.contains(name) || dep_bin {
             findings.push(Finding::supported(format!("runs `{cmd}`"), doc_ref, prov));
         } else {
             findings.push(
@@ -345,7 +388,7 @@ fn package_runner_script<'a>(args: &[&'a str]) -> Option<Target<'a>> {
     if first.starts_with('-') || PM_BUILTINS.contains(first) {
         return None;
     }
-    Some(Target::NpmScript(first))
+    Some(Target::RunnerScript(first))
 }
 
 /// First positional argument to `make` (its goal), skipping flags and the
@@ -369,13 +412,15 @@ fn make_target<'a>(args: &[&'a str]) -> Option<&'a str> {
     None
 }
 
-/// npm/pnpm/yarn subcommands that are not user scripts.
+/// pnpm/yarn subcommands that are not user scripts. `build`, `dev`, and `test`
+/// are deliberately absent: `pnpm build` just runs the `build` script and fails
+/// without one. `start` stays: it falls back to `node server.js`.
 const PM_BUILTINS: &[&str] = &[
     "add", "remove", "rm", "install", "i", "ci", "init", "create", "up", "update", "upgrade",
     "why", "link", "unlink", "dlx", "exec", "publish", "pack", "info", "view", "list", "ls",
     "audit", "outdated", "global", "set", "get", "config", "import", "store", "patch", "prune",
-    "rebuild", "start", "test", "stop", "restart", "version", "login", "logout", "whoami", "cache",
-    "dedupe", "fund", "help", "x", "node", "dev", "build",
+    "rebuild", "start", "stop", "restart", "version", "login", "logout", "whoami", "cache",
+    "dedupe", "fund", "help", "x", "node",
 ];
 
 /// make flags that take a separate value argument.
@@ -524,19 +569,23 @@ mod tests {
         let dir = scratch("yarn");
         fs::write(
             dir.join("package.json"),
-            r#"{"name":"x","scripts":{"build":"tsc"}}"#,
+            r#"{"name":"x","scripts":{"build":"tsc"},"devDependencies":{"tsx":"4"}}"#,
         )
         .unwrap();
         let m = Manifests::load(&dir);
-        // `yarn add` is a builtin (skip); `yarn lint` is an undefined script.
-        let flagged: Vec<String> =
-            check("`yarn add foo` `yarn build` `yarn lint`", "README.md", &m)
-                .iter()
-                .filter(|f| f.verdict.is_reportable())
-                .map(|f| f.detail.clone())
-                .collect();
-        assert_eq!(flagged.len(), 1);
-        assert!(flagged[0].contains("lint"));
+        // `yarn add` is a builtin (skip); `yarn build` is defined; `pnpm tsx`
+        // runs a dependency's binary; `yarn lint` and `pnpm test` are undefined.
+        let flagged: Vec<String> = check(
+            "`yarn add foo` `yarn build` `pnpm tsx x.ts` `yarn lint` `pnpm test`",
+            "README.md",
+            &m,
+        )
+        .iter()
+        .filter(|f| f.verdict.is_reportable())
+        .map(|f| f.detail.clone())
+        .collect();
+        assert_eq!(flagged.len(), 2, "{flagged:?}");
+        assert!(flagged[0].contains("lint") && flagged[1].contains("test"));
     }
 
     #[test]

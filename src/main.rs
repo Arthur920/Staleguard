@@ -115,6 +115,7 @@ pub(crate) fn collect_docs(root: &Path) -> Vec<PathBuf> {
 /// by exact relative path or path suffix, e.g. `README.md` or `docs/usage.md`).
 /// An empty filter means "every doc" (the changelog exclusion still applies).
 pub(crate) fn collect_docs_filtered(root: &Path, filter: &[String]) -> Vec<PathBuf> {
+    let mut site_cache: HashMap<PathBuf, bool> = HashMap::new();
     WalkDir::new(root)
         .into_iter()
         .filter_entry(|e| !crate::code::lang::is_skip_dir(&e.file_name().to_string_lossy()))
@@ -125,10 +126,11 @@ pub(crate) fn collect_docs_filtered(root: &Path, filter: &[String]) -> Vec<PathB
         .filter(|p| {
             matches!(
                 p.extension().and_then(|s| s.to_str()),
-                Some("md") | Some("markdown")
+                Some("md") | Some("markdown") | Some("mdx")
             )
         })
         .filter(|p| !is_changelog_doc(p))
+        .filter(|p| !in_docs_site(p, root, &mut site_cache))
         .filter(|p| {
             if filter.is_empty() {
                 return true;
@@ -139,6 +141,55 @@ pub(crate) fn collect_docs_filtered(root: &Path, filter: &[String]) -> Vec<PathB
                 .any(|f| rel == f.as_str() || rel.ends_with(f.as_str()))
         })
         .collect()
+}
+
+/// Dependencies that mark a package as a docs site (Astro/Starlight,
+/// Docusaurus, Nextra, VitePress, VuePress, Fumadocs).
+const DOCS_SITE_DEPS: &[&str] = &[
+    "astro",
+    "@astrojs/starlight",
+    "@docusaurus/core",
+    "nextra",
+    "vitepress",
+    "vuepress",
+    "fumadocs-core",
+];
+
+/// Content pages of a docs-site package are user-facing product docs written
+/// about the *reader's* project: their paths, scripts, and env vars belong to
+/// the app the reader builds, not to this repo, so checking them only produces
+/// false drift. The site package's own top-level README is still checked.
+/// `cache` maps each package dir to whether it is a docs site.
+fn in_docs_site(doc: &Path, root: &Path, cache: &mut HashMap<PathBuf, bool>) -> bool {
+    let Some(doc_dir) = doc.parent() else {
+        return false;
+    };
+    let mut dir = doc_dir;
+    loop {
+        let manifest = dir.join("package.json");
+        if manifest.is_file() {
+            let is_site = *cache.entry(dir.to_path_buf()).or_insert_with(|| {
+                std::fs::read_to_string(&manifest)
+                    .ok()
+                    .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
+                    .is_some_and(|v| {
+                        ["dependencies", "devDependencies"].iter().any(|k| {
+                            v.get(k).and_then(|d| d.as_object()).is_some_and(|d| {
+                                DOCS_SITE_DEPS.iter().any(|dep| d.contains_key(*dep))
+                            })
+                        })
+                    })
+            });
+            return is_site && dir != doc_dir;
+        }
+        if dir == root {
+            return false;
+        }
+        match dir.parent() {
+            Some(p) => dir = p,
+            None => return false,
+        }
+    }
 }
 
 /// Changelogs and release-note fragments document *past* states, so they
@@ -217,11 +268,13 @@ fn run_check(
     // The repo's path list, walked once, so each doc's path claims match in
     // memory instead of re-walking the whole tree per claim.
     let repo_files = verify::repo_paths(root);
+    let pkg_names = verify::package_names(&repo_files);
     let ctx = check::CheckContext {
         root,
         grounding: &grounding,
         code_tokens: &code_tokens,
         repo_files: &repo_files,
+        pkg_names: &pkg_names,
     };
     let doc_checks = check::doc_checks();
 

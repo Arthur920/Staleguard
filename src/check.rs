@@ -26,6 +26,8 @@ pub(crate) struct CheckContext<'a> {
     pub code_tokens: &'a std::collections::HashSet<String>,
     /// The repo's path list, walked once, so path claims match in memory.
     pub repo_files: &'a [String],
+    /// `name` of every `package.json`, for paths into the repo's own packages.
+    pub pkg_names: &'a std::collections::HashSet<String>,
 }
 
 /// One documentation file in flight: its text, its repo-relative path (used as the
@@ -51,7 +53,7 @@ struct PathCheck;
 impl DocCheck for PathCheck {
     fn check(&self, doc: &Doc, ctx: &CheckContext) -> Vec<Finding> {
         let claims = extract::extract_path_claims(&doc.text, &doc.rel);
-        verify::check_paths(&claims, ctx.root, ctx.repo_files)
+        verify::check_paths(&claims, ctx.root, ctx.repo_files, ctx.pkg_names)
     }
 }
 

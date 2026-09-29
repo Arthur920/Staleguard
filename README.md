@@ -13,7 +13,7 @@
 </p>
 
 Staleguard catches **documentation drift**: places where your READMEs, `CLAUDE.md`,
-and `*.md` docs claim something the code no longer backs up. It checks docs
+and `*.md` / `*.mdx` docs claim something the code no longer backs up. It checks docs
 against the actual codebase and reports what's stale, wrong, or missing.
 
 Everything runs locally and offline. It is **deterministic** (no model, no API) and

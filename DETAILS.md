@@ -4,6 +4,12 @@ This page covers what staleguard detects, how it works, and how it performs. For
 
 ## What it detects
 
+Every `*.md` / `*.mdx` doc in the repo is checked, except changelogs and the
+content pages of a docs-site package (Astro, Docusaurus, Nextra, VitePress,
+…), which describe the reader's project rather than this repo. Paths that are
+absent by design are not flagged: gitignored or build output, and import paths
+into the repo's own packages.
+
 **Broken references**
 - file/dir paths quoted in docs that don't exist in the repo
 - commands (`npm run`, `make`, `cargo --bin`) with no matching script, target,

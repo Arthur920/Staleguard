@@ -172,3 +172,28 @@ fn check_clean_repo_has_no_findings() {
         "clean repo should yield no findings, got: {stdout}"
     );
 }
+
+#[test]
+fn docs_site_content_is_skipped_but_mdx_is_read() {
+    // `www/` is an Astro docs site: its pages describe the reader's generated
+    // app, so their paths aren't this repo's. Its own README and other .mdx
+    // docs are still checked.
+    let fx = Fixture::new(&[
+        ("index.ts", "export const x = 1;\n"),
+        ("www/package.json", r#"{"dependencies": {"astro": "4"}}"#),
+        ("www/src/pages/start.md", "Open `src/pages/index.tsx`.\n"),
+        ("www/README.md", "Theme lives in `public/theme.css`.\n"),
+        ("docs/guide.mdx", "See `src/missing.ts`.\n"),
+    ]);
+    let out = fx.run(&["check", "--format", "json"]);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let json: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    let mut docs: Vec<&str> = json["findings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|f| f["doc_path"].as_str().unwrap())
+        .collect();
+    docs.sort();
+    assert_eq!(docs, ["docs/guide.mdx:1", "www/README.md:1"], "{stdout}");
+}

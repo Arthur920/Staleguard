@@ -72,6 +72,42 @@ fn foreign_manifest(raw: &str, repo_files: &[String]) -> bool {
     })
 }
 
+/// A missing path that is absent by design: under a build-output dir
+/// (`dist/`, `build/`, `node_modules/`, …), or starting with one of the repo's
+/// own package names (`hono/mod.ts` is an import path into the published
+/// `hono` package, not a repo path).
+fn expected_absent(raw: &str, pkg_names: &HashSet<String>) -> bool {
+    let path = raw.trim_start_matches("./");
+    let first = path.split('/').next().unwrap_or(path);
+    crate::code::lang::is_skip_dir(first)
+        || pkg_names.iter().any(|n| {
+            path.strip_prefix(n.as_str())
+                .is_some_and(|r| r.starts_with('/'))
+        })
+}
+
+/// Repo-relative spellings of a path claim to test against `.gitignore`: as
+/// written, and relative to the doc's own directory.
+fn gitignore_candidates(c: &PathClaim) -> Vec<String> {
+    let raw = c.raw.trim_start_matches("./").to_string();
+    match c.doc_path.rsplit_once('/') {
+        Some((dir, _)) => vec![raw.clone(), format!("{dir}/{raw}")],
+        None => vec![raw],
+    }
+}
+
+/// The `name` of every `package.json` in the repo (from the pre-walked path
+/// list), so paths into the repo's own published packages can be recognized.
+pub fn package_names(repo_files: &[String]) -> HashSet<String> {
+    repo_files
+        .iter()
+        .filter(|p| p.ends_with("/package.json") || p.as_str() == "package.json")
+        .filter_map(|p| std::fs::read_to_string(p).ok())
+        .filter_map(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
+        .filter_map(|v| v.get("name")?.as_str().map(str::to_string))
+        .collect()
+}
+
 /// Layer 1: every path a doc names by backtick should exist in the repo. Emits
 /// a `Supported` claim for paths that exist and a `Stale` one for those that do
 /// not; both are anchored (provenance) to the named path so drift lineage can
@@ -82,7 +118,12 @@ fn foreign_manifest(raw: &str, repo_files: &[String]) -> bool {
 /// any pre-walked repo path in `repo_files` ends with it (the suffix case, e.g.
 /// a doc naming `index.ts` for `src/index.ts`). Both are memoized so repeated
 /// claims cost nothing and the tree is never re-walked per claim.
-pub fn check_paths(claims: &[PathClaim], repo_root: &Path, repo_files: &[String]) -> Vec<Finding> {
+pub fn check_paths(
+    claims: &[PathClaim],
+    repo_root: &Path,
+    repo_files: &[String],
+    pkg_names: &HashSet<String>,
+) -> Vec<Finding> {
     // Existence per distinct token, memoized (one stat / suffix scan each).
     let mut exists: HashMap<&str, bool> = HashMap::new();
     for c in claims {
@@ -115,6 +156,16 @@ pub fn check_paths(claims: &[PathClaim], repo_root: &Path, repo_files: &[String]
         }
     }
 
+    // Missing paths that gitignore rules cover are generated output (build
+    // artifacts, scratch dirs), which docs legitimately name. One `git` call per
+    // doc, only when something is missing.
+    let missing: Vec<String> = claims
+        .iter()
+        .filter(|c| !exists[c.raw.as_str()])
+        .flat_map(gitignore_candidates)
+        .collect();
+    let ignored = crate::git::ignored(repo_root, &missing);
+
     let mut findings = Vec::new();
     for c in claims {
         let present = exists[c.raw.as_str()];
@@ -134,6 +185,12 @@ pub fn check_paths(claims: &[PathClaim], repo_root: &Path, repo_files: &[String]
         } else if foreign_manifest(&c.raw, repo_files) {
             // Generic mention of another ecosystem's manifest: not a claim
             // about this repo, so neither supported nor stale.
+            continue;
+        } else if expected_absent(&c.raw, pkg_names)
+            || gitignore_candidates(c).iter().any(|p| ignored.contains(p))
+        {
+            // Generated output, or an import path into one of the repo's own
+            // published packages: absent from the tree by design.
             continue;
         } else {
             findings.push(
@@ -176,7 +233,7 @@ mod tests {
         fs::write(dir.join("real.py"), "x = 1\n").unwrap();
         let md = "Entry point is `real.py`, config in `does/not/exist.toml`.";
         let claims = extract_path_claims(md, "README.md");
-        let findings = check_paths(&claims, &dir, &repo_paths(&dir));
+        let findings = check_paths(&claims, &dir, &repo_paths(&dir), &HashSet::new());
 
         let flagged: Vec<&str> = findings
             .iter()
@@ -195,13 +252,37 @@ mod tests {
         // Pure Rust repo: `package.json` is a generic mention, not drift.
         let rust = scratch_dir("manifest-rust");
         fs::write(rust.join("main.rs"), "fn main() {}\n").unwrap();
-        assert!(flagged(&check_paths(&claims, &rust, &repo_paths(&rust))).is_empty());
+        assert!(flagged(&check_paths(
+            &claims,
+            &rust,
+            &repo_paths(&rust),
+            &HashSet::new()
+        ))
+        .is_empty());
 
         // JS repo that lost its package.json: real drift.
         let js = scratch_dir("manifest-js");
         fs::write(js.join("index.ts"), "export {}\n").unwrap();
-        let findings = check_paths(&claims, &js, &repo_paths(&js));
+        let findings = check_paths(&claims, &js, &repo_paths(&js), &HashSet::new());
         assert!(flagged(&findings).contains(&"references `package.json`"));
+    }
+
+    #[test]
+    fn generated_and_own_package_paths_are_not_stale() {
+        let dir = scratch_dir("generated");
+        fs::write(dir.join("a.ts"), "export {}\n").unwrap();
+        fs::write(dir.join(".gitignore"), ".triage/\n").unwrap();
+        let _ = std::process::Command::new("git")
+            .arg("init")
+            .arg("-q")
+            .arg(&dir)
+            .status();
+        let md = "Output lands in `dist/index.js`; notes in `.triage/index.md`; \
+                  import `hono/mod.ts`; but `src/gone.ts` is stale.";
+        let claims = extract_path_claims(md, "README.md");
+        let pkgs: HashSet<String> = ["hono".to_string()].into();
+        let findings = check_paths(&claims, &dir, &repo_paths(&dir), &pkgs);
+        assert_eq!(flagged(&findings), ["references `src/gone.ts`"]);
     }
 
     #[test]
@@ -210,7 +291,7 @@ mod tests {
         fs::create_dir_all(dir.join("src")).unwrap();
         fs::write(dir.join("src/main.py"), "print('hi')\n").unwrap();
         let claims = extract_path_claims("See `src/main.py`.", "README.md");
-        let findings = check_paths(&claims, &dir, &repo_paths(&dir));
+        let findings = check_paths(&claims, &dir, &repo_paths(&dir), &HashSet::new());
         assert!(findings.iter().all(|f| !f.verdict.is_reportable()));
     }
 
@@ -221,7 +302,7 @@ mod tests {
         let dir = scratch_dir("deleted");
         let md = "**Delete**\n\n- `src/old/handler.ts`\n\n`src/old/handler.ts` no longer exists.";
         let claims = extract_path_claims(md, "PLAN.md");
-        let findings = check_paths(&claims, &dir, &repo_paths(&dir));
+        let findings = check_paths(&claims, &dir, &repo_paths(&dir), &HashSet::new());
         assert!(
             findings.iter().all(|f| !f.verdict.is_reportable()),
             "deletion-context path was flagged: {findings:?}"
@@ -237,7 +318,7 @@ mod tests {
         fs::write(dir.join("src/common/query/query-client.ts"), "//\n").unwrap();
         let md = "| `src/lib/query-client.ts` | `src/common/query/query-client.ts` |";
         let claims = extract_path_claims(md, "PLAN.md");
-        let findings = check_paths(&claims, &dir, &repo_paths(&dir));
+        let findings = check_paths(&claims, &dir, &repo_paths(&dir), &HashSet::new());
         assert!(
             findings.iter().all(|f| !f.verdict.is_reportable()),
             "migration old-path was flagged: {findings:?}"
@@ -261,7 +342,7 @@ mod tests {
         fs::write(dir.join("src/index.ts"), "//\n").unwrap();
         let md = "Entry points: `src/index.ts`, `src/missing.ts`.";
         let claims = extract_path_claims(md, "README.md");
-        let findings = check_paths(&claims, &dir, &repo_paths(&dir));
+        let findings = check_paths(&claims, &dir, &repo_paths(&dir), &HashSet::new());
         assert!(
             flagged(&findings).contains(&"references `src/missing.ts`"),
             "stale path in prose was wrongly suppressed: {findings:?}"
@@ -279,7 +360,7 @@ mod tests {
         fs::write(dir.join("src/core/index.ts"), "//\n").unwrap();
         let md = "See `foo/index.ts` and `core/index.ts`.";
         let claims = extract_path_claims(md, "README.md");
-        let findings = check_paths(&claims, &dir, &repo_paths(&dir));
+        let findings = check_paths(&claims, &dir, &repo_paths(&dir), &HashSet::new());
         let flagged = flagged(&findings);
         assert!(
             flagged.contains(&"references `foo/index.ts`"),
@@ -302,7 +383,7 @@ mod tests {
             claims.iter().all(|c| !c.historical),
             "filename cue word wrongly marked path historical"
         );
-        let findings = check_paths(&claims, &dir, &repo_paths(&dir));
+        let findings = check_paths(&claims, &dir, &repo_paths(&dir), &HashSet::new());
         assert!(
             flagged(&findings).contains(&"references `src/deleted_items.ts`"),
             "stale path with cue-word filename was suppressed: {findings:?}"
