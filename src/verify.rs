@@ -45,6 +45,33 @@ fn path_exists(raw: &str, repo_root: &Path, repo_files: &[String]) -> bool {
     })
 }
 
+/// Source extensions of the ecosystem a bare root manifest belongs to, or `None`
+/// for anything that isn't one. A doc naming `package.json` in a repo with no
+/// JS/TS at all is talking about npm projects in general (e.g. a tool that reads
+/// manifests), not claiming this repo has one.
+fn manifest_ecosystem(raw: &str) -> Option<&'static [&'static str]> {
+    const JS: &[&str] = &["js", "jsx", "mjs", "cjs", "ts", "tsx", "mts", "cts"];
+    Some(match raw.to_ascii_lowercase().as_str() {
+        "package.json" | "package-lock.json" | "tsconfig.json" | "jsconfig.json" | "deno.json"
+        | "deno.jsonc" | "angular.json" | "nx.json" => JS,
+        "cargo.toml" | "cargo.lock" => &["rs"],
+        "pyproject.toml" => &["py"],
+        "composer.json" | "composer.lock" => &["php"],
+        "go.mod" | "go.sum" => &["go"],
+        _ => return None,
+    })
+}
+
+/// Is `raw` a bare manifest for an ecosystem with no source in the repo?
+fn foreign_manifest(raw: &str, repo_files: &[String]) -> bool {
+    manifest_ecosystem(raw).is_some_and(|exts| {
+        !repo_files.iter().any(|p| {
+            p.rsplit_once('.')
+                .is_some_and(|(_, e)| exts.contains(&e.to_ascii_lowercase().as_str()))
+        })
+    })
+}
+
 /// Layer 1: every path a doc names by backtick should exist in the repo. Emits
 /// a `Supported` claim for paths that exist and a `Stale` one for those that do
 /// not; both are anchored (provenance) to the named path so drift lineage can
@@ -104,6 +131,10 @@ pub fn check_paths(claims: &[PathClaim], repo_root: &Path, repo_files: &[String]
             // Named as deleted / renamed / replaced: its absence confirms the
             // doc rather than contradicting it, so emit nothing (zero-FP).
             continue;
+        } else if foreign_manifest(&c.raw, repo_files) {
+            // Generic mention of another ecosystem's manifest: not a claim
+            // about this repo, so neither supported nor stale.
+            continue;
         } else {
             findings.push(
                 Finding::problem(
@@ -154,6 +185,23 @@ mod tests {
             .collect();
         assert!(flagged.contains(&"references `does/not/exist.toml`"));
         assert!(!flagged.contains(&"references `real.py`"));
+    }
+
+    #[test]
+    fn absent_manifest_flagged_only_when_its_ecosystem_is_present() {
+        let md = "Commands ground against `package.json` / `Makefile`.";
+        let claims = extract_path_claims(md, "README.md");
+
+        // Pure Rust repo: `package.json` is a generic mention, not drift.
+        let rust = scratch_dir("manifest-rust");
+        fs::write(rust.join("main.rs"), "fn main() {}\n").unwrap();
+        assert!(flagged(&check_paths(&claims, &rust, &repo_paths(&rust))).is_empty());
+
+        // JS repo that lost its package.json: real drift.
+        let js = scratch_dir("manifest-js");
+        fs::write(js.join("index.ts"), "export {}\n").unwrap();
+        let findings = check_paths(&claims, &js, &repo_paths(&js));
+        assert!(flagged(&findings).contains(&"references `package.json`"));
     }
 
     #[test]
