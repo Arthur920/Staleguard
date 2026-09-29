@@ -159,9 +159,27 @@ fn load_dependency_names(dir: &Path) -> HashSet<String> {
             if let Some((_, tail)) = name.rsplit_once('/') {
                 out.insert(tail.to_string());
             }
+            out.extend(installed_bins(dir, name));
         }
     }
     out
+}
+
+/// Binary names an installed dependency declares (`@changesets/cli` ships
+/// `changeset`). ponytail: only sees installed deps; without `node_modules`
+/// the package name is the only guess.
+fn installed_bins(dir: &Path, dep: &str) -> Vec<String> {
+    let Some(json) =
+        std::fs::read_to_string(dir.join("node_modules").join(dep).join("package.json"))
+            .ok()
+            .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
+    else {
+        return Vec::new();
+    };
+    match json.get("bin") {
+        Some(serde_json::Value::Object(bins)) => bins.keys().cloned().collect(),
+        _ => Vec::new(),
+    }
 }
 
 /// GNU-make target names: the labels left of `:` on rule lines (skipping
@@ -551,6 +569,33 @@ mod tests {
         assert_eq!(flagged.len(), 1);
         assert!(flagged[0].detail.contains("`gone`"));
         assert!(!flagged[0].detail.contains('#'));
+    }
+
+    #[test]
+    fn installed_dependency_bin_is_runnable() {
+        let dir = scratch("depbin");
+        fs::write(
+            dir.join("package.json"),
+            r#"{"name":"x","scripts":{},"devDependencies":{"@changesets/cli":"2"}}"#,
+        )
+        .unwrap();
+        let pkg = dir.join("node_modules/@changesets/cli");
+        fs::create_dir_all(&pkg).unwrap();
+        fs::write(
+            pkg.join("package.json"),
+            r#"{"bin":{"changeset":"bin.js"}}"#,
+        )
+        .unwrap();
+        let m = Manifests::load(&dir);
+        let found = check(
+            "`pnpm changeset` `pnpm nope`",
+            "README.md",
+            &m,
+            &HashSet::new(),
+        );
+        let flagged: Vec<_> = found.iter().filter(|f| f.verdict.is_reportable()).collect();
+        assert_eq!(flagged.len(), 1);
+        assert!(flagged[0].detail.contains("`nope`"));
     }
 
     #[test]
