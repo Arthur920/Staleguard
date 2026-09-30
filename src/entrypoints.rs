@@ -119,9 +119,7 @@ pub fn check(markdown: &str, doc_path: &str, g: &Grounding) -> Vec<Finding> {
                 Verdict::Stale,
                 claim,
                 doc_ref,
-                format!(
-                    "`{reference}` is named in docs but `{member}` resolves to no symbol or module in the code."
-                ),
+                format!("`{member}` in `{reference}` matches no symbol or module"),
             ));
         }
     }

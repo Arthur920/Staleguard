@@ -379,9 +379,7 @@ pub fn check(
                     Verdict::Stale,
                     format!("runs `{cmd}`"),
                     doc_ref,
-                    format!(
-                        "Command `{cmd}` names {kind} `{name}`, which the repo does not define."
-                    ),
+                    format!("{kind} `{name}` is not defined"),
                 )
                 .anchored(prov),
             );

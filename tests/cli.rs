@@ -80,7 +80,7 @@ fn stale_path_suggests_the_moved_file() {
     assert!(
         details
             .iter()
-            .any(|d| d.contains("src/helpers.rs") && d.ends_with("Did you mean `pkg/helpers.rs`?")),
+            .any(|d| d.contains("src/helpers.rs") && d.ends_with("did you mean `pkg/helpers.rs`?")),
         "{details:?}"
     );
 }

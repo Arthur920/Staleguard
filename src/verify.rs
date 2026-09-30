@@ -218,10 +218,7 @@ pub fn check_paths(
                     Verdict::Stale,
                     format!("references `{}`", c.raw),
                     doc_ref,
-                    format!(
-                        "Path `{}` is named in docs but does not exist in the repo.",
-                        c.raw
-                    ),
+                    format!("path `{}` does not exist", c.raw),
                 )
                 .anchored(prov),
             );

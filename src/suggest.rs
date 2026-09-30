@@ -1,4 +1,4 @@
-//! "Did you mean …?" hints on stale findings, so a finding is a one-line fix
+//! "did you mean …?" hints on stale findings, so a finding is a one-line fix
 //! rather than a hunt: a missing path's git rename (or the one file elsewhere
 //! with the same name), and the closest defined script or code identifier for
 //! a missing script or env var. Hints only touch `detail`, never the claim or
@@ -19,10 +19,10 @@ pub fn annotate(
     // Rename history is only fetched when some path is actually stale.
     let mut renames: Option<HashMap<String, String>> = None;
     for f in findings.iter_mut().filter(|f| f.verdict == Verdict::Stale) {
-        let hint = if let Some(p) = ticked(&f.detail, "Path `") {
+        let hint = if let Some(p) = ticked(&f.detail, "path `") {
             let renames = renames.get_or_insert_with(|| crate::git::renames(root));
             renamed(p, root, renames).or_else(|| same_name(p, root, repo_files))
-        } else if let Some(s) = ticked(&f.detail, "names script `") {
+        } else if let Some(s) = ticked(&f.detail, "script `") {
             closest(s, scripts.iter())
         } else if let Some(name) = ticked(&f.claim, "references env var `") {
             // Same first segment, so `VITE_MAX_FILE_SIZE` never suggests
@@ -38,7 +38,7 @@ pub fn annotate(
             None
         };
         if let Some(h) = hint {
-            f.detail.push_str(&format!(" Did you mean `{h}`?"));
+            f.detail.push_str(&format!("; did you mean `{h}`?"));
         }
     }
 }
@@ -151,20 +151,32 @@ mod tests {
             .into();
         let scripts: HashSet<String> = ["type-check", "dev"].map(String::from).into();
         let mut fs = vec![
-            stale("runs `npm run typecheck`", "Command `npm run typecheck` names script `typecheck`, which the repo does not define."),
-            stale("runs `npm run demo:setup`", "Command `npm run demo:setup` names script `demo:setup`, which the repo does not define."),
-            stale("references env var `AUTHENTICATION_ERROR`", "`AUTHENTICATION_ERROR` is named in docs but appears nowhere in the code."),
-            stale("references `src/Dhl.spec.ts`", "Path `src/Dhl.spec.ts` is named in docs but does not exist in the repo."),
+            stale(
+                "runs `npm run typecheck`",
+                "script `typecheck` is not defined",
+            ),
+            stale(
+                "runs `npm run demo:setup`",
+                "script `demo:setup` is not defined",
+            ),
+            stale(
+                "references env var `AUTHENTICATION_ERROR`",
+                "env var `AUTHENTICATION_ERROR` is not used in the code",
+            ),
+            stale(
+                "references `src/Dhl.spec.ts`",
+                "path `src/Dhl.spec.ts` does not exist",
+            ),
         ];
         annotate(&mut fs, &dir, &[moved], &tokens, &scripts);
-        assert!(fs[0].detail.ends_with("Did you mean `type-check`?"));
-        assert!(!fs[1].detail.contains("Did you mean"));
+        assert!(fs[0].detail.ends_with("did you mean `type-check`?"));
+        assert!(!fs[1].detail.contains("did you mean"));
         assert!(fs[2]
             .detail
-            .ends_with("Did you mean `AUTHENTICATION_FAILED`?"));
+            .ends_with("did you mean `AUTHENTICATION_FAILED`?"));
         assert!(fs[3]
             .detail
-            .ends_with("Did you mean `src/unit/Dhl.spec.ts`?"));
+            .ends_with("did you mean `src/unit/Dhl.spec.ts`?"));
     }
 
     #[test]

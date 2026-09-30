@@ -6,7 +6,7 @@
 //! stays argument-parsing plus a render call.
 
 use crate::drift;
-use crate::findings::Finding;
+use crate::findings::{Finding, Verdict};
 
 use clap::ValueEnum;
 
@@ -20,28 +20,58 @@ pub enum Format {
     Sarif,
 }
 
-pub(crate) fn report(findings: &[Finding], format: Format) {
-    match format {
-        Format::Sarif => {
-            println!(
-                "{}",
-                serde_json::to_string_pretty(&crate::sarif::render(findings)).unwrap()
-            );
-        }
-        Format::Json => {
-            println!("{}", serde_json::to_string_pretty(findings).unwrap());
-        }
-        Format::Text => {
-            if findings.is_empty() {
-                println!("\u{2713} no coherence issues found");
-                return;
-            }
-            for f in findings {
-                println!("[{}] {}: {}", f.verdict.as_str(), f.doc_path, f.detail);
-            }
-            println!("\n{} finding(s)", findings.len());
-        }
+/// Findings grouped under their doc, sorted by line, one per row:
+///
+/// ```text
+/// README.md
+///   31  script `demo:setup` is not defined
+///   97  script `demo:reset` is not defined; did you mean `db:reset`?
+/// ```
+fn render_text(findings: &[Finding]) -> String {
+    use std::fmt::Write;
+    if findings.is_empty() {
+        return "\u{2713} no stale docs found\n".into();
     }
+    let split = |f: &Finding| match f.doc_path.rsplit_once(':') {
+        Some((doc, line)) if line.parse::<usize>().is_ok() => {
+            (doc.to_string(), line.parse().unwrap())
+        }
+        _ => (f.doc_path.clone(), 0),
+    };
+    let mut rows: Vec<(String, usize, &Finding)> = findings
+        .iter()
+        .map(|f| {
+            let (doc, line) = split(f);
+            (doc, line, f)
+        })
+        .collect();
+    rows.sort_by(|a, b| (&a.0, a.1).cmp(&(&b.0, b.1)));
+    let width = rows
+        .iter()
+        .map(|r| r.1.to_string().len())
+        .max()
+        .unwrap_or(1);
+
+    let mut out = String::new();
+    let mut docs = 0;
+    let mut current = "";
+    for (doc, line, f) in &rows {
+        if doc != current {
+            if docs > 0 {
+                out.push('\n');
+            }
+            docs += 1;
+            current = doc;
+            let _ = writeln!(out, "{doc}");
+        }
+        let tag = match f.verdict {
+            Verdict::Stale => String::new(),
+            v => format!("[{}] ", v.as_str()),
+        };
+        let _ = writeln!(out, "  {line:>width$}  {tag}{}", f.detail);
+    }
+    let _ = writeln!(out, "\n{} finding(s) in {docs} doc(s)", rows.len());
+    out
 }
 
 /// Report a completed drift run: the findings plus the alignment score and the
@@ -65,9 +95,9 @@ pub(crate) fn report_check(out: &drift::Outcome, format: Format) {
             println!("{}", serde_json::to_string_pretty(&payload).unwrap());
         }
         Format::Text => {
-            report(&out.findings, format);
+            print!("{}", render_text(&out.findings));
             println!(
-                "\nalignment {:.3} | {} claim(s), {} carried forward",
+                "alignment {:.3} | {} claim(s), {} carried forward",
                 out.score.repo, out.total_claims, out.carried_forward
             );
             if let Some((base, head)) = out.regression {

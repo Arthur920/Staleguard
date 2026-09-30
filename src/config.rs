@@ -87,7 +87,7 @@ fn check_env_vars(
                 Verdict::Stale,
                 claim,
                 doc_ref,
-                format!("`{name}` is named in docs but appears nowhere in the code."),
+                format!("env var `{name}` is not used in the code"),
             ));
         }
     }
@@ -126,7 +126,7 @@ fn check_flags(
                     Verdict::Stale,
                     claim,
                     doc_ref,
-                    format!("Flag `--{flag}` for `{bin}` is documented but absent from the code."),
+                    format!("flag `--{flag}` of `{bin}` is not in the code"),
                 ));
             }
         }
