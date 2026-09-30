@@ -14,10 +14,6 @@ Finds docs that lie about your code: paths, scripts, env vars, flags, and
 symbols your READMEs and `CLAUDE.md` name but the repo no longer has. Local,
 deterministic, tuned for TypeScript.
 
-<p align="center">
-  <img src="demo.gif" alt="Staleguard demo" width="760">
-</p>
-
 ## Install
 
 ```bash
