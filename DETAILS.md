@@ -48,6 +48,60 @@ staleguard check --doc README.md # restrict to one doc
 Output is `text` (human) or `json` (machine-readable). `check` exits non-zero on
 any reportable finding or a score regression, so it drops into CI as is.
 
+## CI
+
+Commit a baseline on the main branch, then fail PRs only on new drift:
+
+```bash
+staleguard check --write-ledger        # once, on main; writes .staleguard/
+staleguard check --fail-on-regression  # on each PR
+```
+
+**GitHub Action.** Inputs: `args`, `format` (`text`/`json`/`sarif`), `version`,
+`working-directory`. For inline PR annotations, emit SARIF and upload it:
+
+```yaml
+- uses: Arthur920/Staleguard@v0.4.0
+  id: staleguard
+  with:
+    format: sarif
+- uses: github/codeql-action/upload-sarif@v3
+  if: always()
+  with:
+    sarif_file: ${{ steps.staleguard.outputs.sarif-file }}
+```
+
+**Pre-commit.**
+
+```yaml
+- repo: https://github.com/Arthur920/Staleguard
+  rev: v0.4.0
+  hooks:
+    - id: staleguard
+```
+
+**Severity.** Broken references and contradictions are `error`; unconfirmable
+claims are `warning`. `--min-severity error` is the strictest gate.
+
+## Configuration
+
+`.staleguard.toml` at the repo root, all keys optional:
+
+```toml
+exclude = ["docs/legacy/**", "NOTES.md"]  # doc globs to skip
+suppress = ["unverifiable"]               # contradicted | stale | unverifiable
+min_severity = "error"                    # note < warning < error; --min-severity overrides
+```
+
+Suppressed and filtered claims drop out of the alignment score's denominator, so
+the score describes what you chose to check.
+
+## Agents
+
+Tell your agent (e.g. in `CLAUDE.md`): *"After editing code or docs, run
+`staleguard check --format json` and fix any reported drift."* The JSON output
+(one object per finding) also maps directly onto an MCP tool result.
+
 ## Performance and footprint
 
 - A full `check` of a mid-size TypeScript monorepo takes **~1.2s**. Per-file
