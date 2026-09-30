@@ -30,7 +30,7 @@ staleguard check
 In CI:
 
 ```yaml
-- uses: Arthur920/Staleguard@v0.4.0
+- uses: Arthur920/Staleguard@v0.4.1
 ```
 
 CI baselines, SARIF, pre-commit, and config: [DETAILS.md](DETAILS.md).

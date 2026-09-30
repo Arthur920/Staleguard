@@ -61,7 +61,7 @@ staleguard check --fail-on-regression  # on each PR
 `working-directory`. For inline PR annotations, emit SARIF and upload it:
 
 ```yaml
-- uses: Arthur920/Staleguard@v0.4.0
+- uses: Arthur920/Staleguard@v0.4.1
   id: staleguard
   with:
     format: sarif
@@ -75,7 +75,7 @@ staleguard check --fail-on-regression  # on each PR
 
 ```yaml
 - repo: https://github.com/Arthur920/Staleguard
-  rev: v0.4.0
+  rev: v0.4.1
   hooks:
     - id: staleguard
 ```
