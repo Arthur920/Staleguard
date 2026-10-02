@@ -108,7 +108,7 @@ changes before it finishes, add a `Stop` hook to your `.claude/settings.json`:
 {
   "hooks": {
     "Stop": [
-      { "hooks": [{ "type": "command", "command": "staleguard check --diff HEAD >&2 || exit 2" }] }
+      { "hooks": [{ "type": "command", "command": "grep -q '\"stop_hook_active\": *true' || staleguard check --diff HEAD >&2 || exit 2" }] }
     ]
   }
 }
@@ -116,7 +116,9 @@ changes before it finishes, add a `Stop` hook to your `.claude/settings.json`:
 
 `--diff HEAD` limits the check to drift the uncommitted work introduced. Exit
 code 2 sends the findings back to Claude, which fixes the docs (or the code)
-before it stops. Other agents can run `staleguard check --diff HEAD --format
+before it stops. The `grep` lets the next stop through (`stop_hook_active` is
+set once Claude is already continuing for a Stop hook), so Claude gets one
+round of feedback and can't loop if it decides the finding should stay. Other agents can run `staleguard check --diff HEAD --format
 json` and use the findings (one JSON object each) in the same way.
 
 ## Performance and footprint

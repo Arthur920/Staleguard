@@ -620,11 +620,12 @@ staleguard check">COPY</button></div>
   <div class="panel" id="t-agent">
     <p class="lead">A Claude Code <code>Stop</code> hook makes the agent check its own changes before it finishes, and fix any drift it introduced. Other agents can run <code>--format json</code> and read the findings back.</p>
     <div class="code-block">
-      <div class="bar"><div class="lights"><i></i><i></i><i></i></div><span class="title">agent</span><button class="copy-btn" data-copy="staleguard check --diff HEAD &gt;&amp;2 || exit 2">COPY</button></div>
+      <div class="bar"><div class="lights"><i></i><i></i><i></i></div><span class="title">agent</span><button class="copy-btn" data-copy="grep -q '&quot;stop_hook_active&quot;: *true' || staleguard check --diff HEAD &gt;&amp;2 || exit 2">COPY</button></div>
       <pre><span class="cm"># .claude/settings.json → hooks.Stop[].hooks[].command</span>
-<span class="sigil">$ </span><span class="cmd">staleguard check</span> <span class="flag">--diff</span> HEAD &gt;&amp;2 || exit 2
+<span class="sigil">$ </span>grep -q '"stop_hook_active": *true' || <span class="cmd">staleguard check</span> <span class="flag">--diff</span> HEAD &gt;&amp;2 || exit 2
 
-<span class="cm"># exit 2 hands the findings back to Claude, which fixes them</span></pre>
+<span class="cm"># exit 2 hands the findings back to Claude, which fixes them;</span>
+<span class="cm"># the grep lets the next stop through, so it never loops</span></pre>
     </div>
   </div>
 

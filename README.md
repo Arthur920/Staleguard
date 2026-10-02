@@ -42,7 +42,7 @@ sees any drift its own changes introduced and fixes it:
 {
   "hooks": {
     "Stop": [
-      { "hooks": [{ "type": "command", "command": "staleguard check --diff HEAD >&2 || exit 2" }] }
+      { "hooks": [{ "type": "command", "command": "grep -q '\"stop_hook_active\": *true' || staleguard check --diff HEAD >&2 || exit 2" }] }
     ]
   }
 }
