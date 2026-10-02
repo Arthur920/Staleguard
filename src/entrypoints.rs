@@ -1,4 +1,4 @@
-//! Layer 1: qualified code references in docs that the code index can't
+//! Qualified code references in docs that the code index can't
 //! resolve. A backtick token like `verify::check_paths` or `CodeIndex::build`
 //! names a member of a module or type; if that module/type is local but the
 //! final member exists nowhere as a symbol, the reference is `stale`.

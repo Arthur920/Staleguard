@@ -40,7 +40,7 @@ struct Cli {
 /// Worked examples appended to `staleguard --help`.
 const EXAMPLES: &str = "\
 Examples:
-  staleguard check                  full repo, deterministic (layer 1)
+  staleguard check                  full repo
   staleguard check --diff main      only drift introduced since main
   staleguard check --format json    machine-readable findings (exits non-zero on drift)
   staleguard check --format sarif   SARIF for GitHub code scanning / PR annotations

@@ -1,4 +1,4 @@
-//! Shared finding type used by every layer.
+//! Shared finding type used by every check.
 //!
 //! A `Finding` carries the doc assertion, the [`Provenance`] it is anchored to
 //! in code, and a [`Verdict`]. A `Supported` finding is a claim that verified
@@ -82,8 +82,6 @@ pub struct Finding {
     pub doc_path: String,
     /// human-readable explanation
     pub detail: String,
-    /// 1 deterministic | 2 retrieval | 3 llm
-    pub layer: u8,
     /// supporting / conflicting code references
     pub code_refs: Vec<String>,
     /// what the claim is anchored to in code. Defaults to empty so older
@@ -106,7 +104,6 @@ impl Finding {
             claim: claim.into(),
             doc_path: doc_path.into(),
             detail: detail.into(),
-            layer: 1,
             code_refs: Vec::new(),
             provenance: Provenance::default(),
         }
@@ -123,7 +120,6 @@ impl Finding {
             claim: claim.into(),
             doc_path: doc_path.into(),
             detail: String::new(),
-            layer: 1,
             code_refs: Vec::new(),
             provenance,
         }

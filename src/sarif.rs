@@ -43,7 +43,7 @@ fn result(f: &Finding) -> Value {
                 "region": { "startLine": line }
             }
         }],
-        "properties": { "claim": f.claim, "layer": f.layer }
+        "properties": { "claim": f.claim }
     })
 }
 

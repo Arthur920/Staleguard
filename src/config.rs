@@ -1,4 +1,4 @@
-//! Layer 1: env vars and CLI flags named in docs that the code never reads.
+//! Env vars and CLI flags named in docs that the code never reads.
 //!
 //! Grounding is loose presence in source: the same fewest-false-positives
 //! rule coverage-gaps uses. An env var is "real" if its name appears as a token

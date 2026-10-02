@@ -1,4 +1,4 @@
-//! Layer 1: verify shell commands quoted in docs against the repo's build
+//! Verify shell commands quoted in docs against the repo's build
 //! manifests. An `npm run` / `make` / `cargo --bin` invocation that names a
 //! script, target, or binary the repo doesn't declare is `stale`.
 //!

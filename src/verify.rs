@@ -1,11 +1,4 @@
-//! Verification layers.
-//!
-//! Layer 1 (deterministic) lives here. Layer 2 (retrieval) is in [`retrieve`]
-//! and Layer 3 (the NLI judge) in [`judge`]; both are gated behind the `ml`
-//! feature.
-//!
-//! [`retrieve`]: crate::retrieve
-//! [`judge`]: crate::judge
+//! Path claims: every path a doc names should exist in the repo.
 
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
@@ -128,7 +121,7 @@ fn package_jsons(repo_files: &[String]) -> impl Iterator<Item = serde_json::Valu
         .filter_map(|t| serde_json::from_str(&t).ok())
 }
 
-/// Layer 1: every path a doc names by backtick should exist in the repo. Emits
+/// Every path a doc names by backtick should exist in the repo. Emits
 /// a `Supported` claim for paths that exist and a `Stale` one for those that do
 /// not; both are anchored (provenance) to the named path so drift lineage can
 /// invalidate them when that file changes.
