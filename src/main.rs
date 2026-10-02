@@ -42,7 +42,7 @@ struct Cli {
 const EXAMPLES: &str = "\
 Examples:
   staleguard check                  full repo, deterministic (layer 1)
-  staleguard check --diff main      only re-check what changed vs main
+  staleguard check --diff main      only drift introduced since main
   staleguard check --format json    machine-readable findings (exits non-zero on drift)
   staleguard check --format sarif   SARIF for GitHub code scanning / PR annotations
   staleguard check --write-ledger   set the CI alignment baseline on the base branch
@@ -59,8 +59,8 @@ enum Commands {
         /// Output format.
         #[arg(long, value_enum, default_value_t = Format::Text)]
         format: Format,
-        /// Drift base: only re-derive claims whose code changed since this git
-        /// ref (default: the committed ledger's last commit).
+        /// Report only drift introduced since this git ref (e.g. `main`, or
+        /// `HEAD` for uncommitted work); findings already present there are hidden.
         #[arg(long)]
         diff: Option<String>,
         /// Persist the drift ledger + alignment score under `.staleguard/` (run this
@@ -96,9 +96,14 @@ pub(crate) fn collect_docs_filtered(root: &Path, filter: &[String]) -> Vec<PathB
         .filter(crate::code::lang::within_size_limit)
         .map(|e| e.into_path())
         .filter(|p| {
+            // `.mdc` and the dotfiles are agent rules (Cursor, Windsurf, Cline):
+            // stale ones make agents run commands and edit paths that are gone.
             matches!(
                 p.extension().and_then(|s| s.to_str()),
-                Some("md") | Some("markdown") | Some("mdx")
+                Some("md") | Some("markdown") | Some("mdx") | Some("mdc")
+            ) || matches!(
+                p.file_name().and_then(|s| s.to_str()),
+                Some(".cursorrules") | Some(".windsurfrules") | Some(".clinerules")
             )
         })
         .filter(|p| !is_changelog_doc(p))
@@ -200,6 +205,12 @@ pub(crate) fn is_changelog_doc(path: &Path) -> bool {
     if NAMES.contains(&name.as_str()) {
         return true;
     }
+    // Audit reports (`DOCUMENTATION_AUDIT_REPORT.md`, `audit/findings.md`) are
+    // point-in-time records that list deleted files on purpose.
+    let stem = name.rsplit_once('.').map_or(name.as_str(), |(s, _)| s);
+    if stem.contains("audit") || stem.ends_with("report") {
+        return true;
+    }
     // Towncrier-style fragment directories: `changes/`, `changelog.d/`, `news.d/`.
     path.components().any(|c| {
         matches!(
@@ -216,6 +227,11 @@ pub(crate) fn is_changelog_doc(path: &Path) -> bool {
                 | Some("adr")
                 | Some("adrs")
                 | Some("decisions")
+                | Some("audit")
+                | Some("audits")
+                // Agent plan docs (`.agents/plans/`): proposals naming files
+                // that don't exist yet.
+                | Some("plans")
         )
     })
 }
@@ -296,6 +312,36 @@ fn run_check(
     drift::run(findings, &index, root, opts)
 }
 
+/// `--diff <ref>`: keep only drift introduced since `ref`. The same checks run
+/// on a checkout of `ref`, and findings already there are dropped. This works for
+/// every claim kind, whether the doc line or the code behind it changed.
+/// Findings match on doc file + claim (not line), so edits that shift lines don't
+/// resurface old drift.
+fn keep_introduced(
+    root: &Path,
+    base: &str,
+    docs: &[String],
+    min_severity: Option<findings::Severity>,
+    findings: &mut Vec<findings::Finding>,
+) {
+    let Some(wt) = git::worktree(root, base) else {
+        eprintln!("warning: can't check out `{base}` (shallow clone?); reporting all findings");
+        return;
+    };
+    let before = run_check(&wt.root, &drift::Options::default(), docs, min_severity);
+    let key = |f: &findings::Finding| {
+        let file = f.doc_path.rsplit_once(':').map_or(&*f.doc_path, |(p, _)| p);
+        (file.to_string(), f.claim.clone())
+    };
+    let known: std::collections::HashSet<_> = before.findings.iter().map(key).collect();
+    let total = findings.len();
+    findings.retain(|f| !known.contains(&key(f)));
+    let hidden = total - findings.len();
+    if hidden > 0 {
+        eprintln!("{hidden} finding(s) already present at `{base}` not shown");
+    }
+}
+
 fn main() -> ExitCode {
     let cli = Cli::parse();
     match cli.command {
@@ -314,7 +360,10 @@ fn main() -> ExitCode {
                 write_ledger,
                 fail_on_regression,
             };
-            let out = run_check(&root, &opts, &docs, min_severity);
+            let mut out = run_check(&root, &opts, &docs, min_severity);
+            if let Some(base) = &opts.diff_ref {
+                keep_introduced(&root, base, &docs, min_severity, &mut out.findings);
+            }
             report::report_check(&out, format);
             // Fail on any reportable finding, or on a score regression in CI.
             if out.findings.is_empty() && out.regression.is_none() {
@@ -322,6 +371,26 @@ fn main() -> ExitCode {
             } else {
                 ExitCode::FAILURE
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_changelog_doc;
+    use std::path::Path;
+
+    #[test]
+    fn audit_reports_are_history() {
+        for p in [
+            "design/DOCUMENTATION_AUDIT_REPORT.md",
+            "design/audit/findings.md",
+            "x/UNNECESSARY_DOCS_REPORT.md",
+        ] {
+            assert!(is_changelog_doc(Path::new(p)), "{p}");
+        }
+        for p in ["docs/reporting.md", "docs/REPORTS_API.md", "README.md"] {
+            assert!(!is_changelog_doc(Path::new(p)), "{p}");
         }
     }
 }

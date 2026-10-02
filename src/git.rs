@@ -8,7 +8,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::io::Write;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use crate::code::CodeIndex;
@@ -69,6 +69,37 @@ pub fn is_repo(root: &Path) -> bool {
 /// The current HEAD commit sha.
 pub fn head_sha(root: &Path) -> Option<String> {
     git(root, &["rev-parse", "HEAD"]).map(|s| s.trim().to_string())
+}
+
+/// A detached, throwaway checkout of some revision, removed on drop.
+pub struct Worktree {
+    repo: PathBuf,
+    dir: PathBuf,
+    /// The checkout's counterpart of the `root` it was made from (same
+    /// subdirectory when `root` isn't the repo top level).
+    pub root: PathBuf,
+}
+
+impl Drop for Worktree {
+    fn drop(&mut self) {
+        let dir = self.dir.to_string_lossy().into_owned();
+        let _ = git(&self.repo, &["worktree", "remove", "--force", &dir]);
+    }
+}
+
+/// Check `rev` out into a temp worktree. `None` if `rev` doesn't resolve (e.g.
+/// a shallow CI clone) or git is unavailable.
+pub fn worktree(root: &Path, rev: &str) -> Option<Worktree> {
+    let prefix = git(root, &["rev-parse", "--show-prefix"])?;
+    let dir = std::env::temp_dir().join(format!("staleguard-base-{}", std::process::id()));
+    let d = dir.to_string_lossy().into_owned();
+    git(root, &["worktree", "add", "--detach", "--force", &d, rev])?;
+    let dir = std::fs::canonicalize(&dir).unwrap_or(dir);
+    Some(Worktree {
+        repo: root.to_path_buf(),
+        root: dir.join(prefix.trim()),
+        dir,
+    })
 }
 
 /// One file's change between `base` and the working tree: its new-side path, the

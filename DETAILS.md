@@ -4,7 +4,9 @@ This page covers what staleguard detects, how it works, and how it performs. For
 
 ## What it detects
 
-Every `*.md` / `*.mdx` doc in the repo is checked, except changelogs and the
+Every `*.md` / `*.mdx` doc in the repo is checked, along with agent rules
+(`CLAUDE.md`, `AGENTS.md`, `.cursor/rules/*.mdc`, `.cursorrules`,
+`.windsurfrules`, `.clinerules`), except changelogs and the
 content pages of a docs-site package (Astro, Docusaurus, Nextra, VitePress,
 …), which describe the reader's project rather than this repo. Paths that are
 absent by design are not flagged: gitignored or build output, and import paths
@@ -26,7 +28,8 @@ grounding parses TypeScript/JavaScript (the tuned target) plus Rust, Python,
 and Java on a best-effort basis.
 
 **Drift over time**
-- `--diff <ref>` re-checks only what changed since a git ref
+- `--diff <ref>` reports only drift introduced since a git ref, whether a doc
+  edit or a code change (a deleted file, a removed script) caused it
 - a per-module and repo-wide **alignment score**, with a CI **regression gate**
 - fingerprint staleness: a previously-verified claim is flagged when the code
   behind it changes
@@ -40,7 +43,7 @@ alignment, and gates CI on regressions.
 
 ```bash
 staleguard check                 # full repo
-staleguard check --diff main     # only what changed vs main
+staleguard check --diff main     # only drift introduced vs main
 staleguard check --format json   # machine-readable findings
 staleguard check --doc README.md # restrict to one doc
 ```
@@ -50,7 +53,18 @@ any reportable finding or a score regression, so it drops into CI as is.
 
 ## CI
 
-Commit a baseline on the main branch, then fail PRs only on new drift:
+Fail a PR only on drift it introduces. This needs the base branch fetched:
+
+```yaml
+- uses: actions/checkout@v4
+  with:
+    fetch-depth: 0
+- uses: Arthur920/Staleguard@v0.4.1
+  with:
+    args: --diff origin/${{ github.base_ref }}
+```
+
+Or commit a baseline on the main branch and gate on the alignment score:
 
 ```bash
 staleguard check --write-ledger        # once, on main; writes .staleguard/
@@ -98,9 +112,24 @@ the score describes what you chose to check.
 
 ## Agents
 
-Tell your agent (e.g. in `CLAUDE.md`): *"After editing code or docs, run
-`staleguard check --format json` and fix any reported drift."* The JSON output
-(one object per finding) also maps directly onto an MCP tool result.
+Stale agent instructions are worse than stale READMEs: the agent runs the
+dead command and edits the moved path. To make Claude Code check its own
+changes before it finishes, add a `Stop` hook to `.claude/settings.json`:
+
+```json
+{
+  "hooks": {
+    "Stop": [
+      { "hooks": [{ "type": "command", "command": "staleguard check --diff HEAD >&2 || exit 2" }] }
+    ]
+  }
+}
+```
+
+`--diff HEAD` limits the check to drift the uncommitted work introduced. Exit
+code 2 sends the findings back to Claude, which fixes the docs (or the code)
+before it stops. Other agents can run `staleguard check --diff HEAD --format
+json` and use the findings (one JSON object each) in the same way.
 
 ## Performance and footprint
 

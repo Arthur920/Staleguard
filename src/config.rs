@@ -68,7 +68,7 @@ fn check_env_vars(
     // variables of an example snippet, not env vars the project reads.
     let assigned = assigned_names(markdown);
     let mut seen = HashSet::new();
-    for (line, name) in env_var_claims(markdown) {
+    for (line, name, dollar) in env_var_claims(markdown) {
         if SYSTEM_ENV.contains(&name.as_str())
             || is_placeholder(&name)
             || assigned.contains(&name)
@@ -87,7 +87,13 @@ fn check_env_vars(
                 Verdict::Stale,
                 claim,
                 doc_ref,
-                format!("env var `{name}` is not used in the code"),
+                // A bare `NAME` in prose may be an error code or constant, not
+                // an env var; only `$NAME` is certainly one.
+                if dollar {
+                    format!("env var `{name}` is not used in the code")
+                } else {
+                    format!("`{name}` appears nowhere in the code")
+                },
             ));
         }
     }
@@ -193,7 +199,8 @@ fn capitalize_join(segments: &[&str], lower_first: bool) -> String {
 /// dollar form skips shell variables that follow other conventions: zsh
 /// `$fpath` (lowercase), PowerShell `$OutputEncoding` (PascalCase), which
 /// appear in example snippets but are not the project's own env vars.
-fn env_var_claims(markdown: &str) -> Vec<(usize, String)> {
+/// `(line, name, written as $NAME)` for each env-var-looking name.
+fn env_var_claims(markdown: &str) -> Vec<(usize, String, bool)> {
     let mut out = Vec::new();
     let mut in_fence = false;
     // `$NAME` only reads as an env var in prose or a shell-like block; in a
@@ -217,14 +224,14 @@ fn env_var_claims(markdown: &str) -> Vec<(usize, String)> {
         for cap in dollar_env_re().captures_iter(line) {
             let name = &cap[1];
             if upper_env_re().is_match(name) {
-                out.push((lineno, name.to_string()));
+                out.push((lineno, name.to_string(), true));
             }
         }
         if !in_fence {
             for cap in inline_code_re().captures_iter(line) {
                 let inner = cap[1].trim();
                 if upper_snake_env_re().is_match(inner) {
-                    out.push((lineno, inner.to_string()));
+                    out.push((lineno, inner.to_string(), false));
                 }
             }
         }
@@ -246,7 +253,18 @@ fn assigned_names(markdown: &str) -> HashSet<String> {
 /// (`${YOUR_ENV}`, `$MY_VAR`). Never the project's own env var.
 fn is_placeholder(name: &str) -> bool {
     const PLACEHOLDER_PREFIXES: &[&str] = &["YOUR_", "MY_"];
-    const PLACEHOLDER_EXACT: &[&str] = &["FOO", "BAR", "BAZ", "PLACEHOLDER", "CHANGEME"];
+    // `$ARGUMENTS` is the slash-command template slot (Claude Code, opencode);
+    // `$USERNAME` / `$PASSWORD` are credentials the reader supplies.
+    const PLACEHOLDER_EXACT: &[&str] = &[
+        "FOO",
+        "BAR",
+        "BAZ",
+        "PLACEHOLDER",
+        "CHANGEME",
+        "ARGUMENTS",
+        "USERNAME",
+        "PASSWORD",
+    ];
     PLACEHOLDER_PREFIXES.iter().any(|p| name.starts_with(p))
         || PLACEHOLDER_EXACT.contains(&name)
         || name.contains("YOUR")
@@ -380,8 +398,19 @@ mod tests {
     fn template_literal_in_js_block_is_not_an_env_var() {
         let md = "```ts\nconst s = `max-age=${ONE_DAY_SECONDS}`;\n```\n\
                   ```sh\nexport X=1 && run --token $API_TOKEN\n```\n";
-        let names: Vec<String> = env_var_claims(md).into_iter().map(|(_, n)| n).collect();
+        let names: Vec<String> = env_var_claims(md).into_iter().map(|(_, n, _)| n).collect();
         assert_eq!(names, ["API_TOKEN"]);
+    }
+
+    #[test]
+    fn bare_name_is_not_labelled_env_var() {
+        let md = "Code `BAD_REQUEST`; run with `$API_TOKEN`.";
+        let details: Vec<String> = check(md, "README.md", &tokens(&[]), &HashSet::new())
+            .into_iter()
+            .map(|f| f.detail)
+            .collect();
+        assert!(details.contains(&"`BAD_REQUEST` appears nowhere in the code".to_string()));
+        assert!(details.contains(&"env var `API_TOKEN` is not used in the code".to_string()));
     }
 
     #[test]
@@ -414,7 +443,7 @@ mod tests {
     #[test]
     fn placeholder_env_var_is_not_flagged() {
         let code = HashSet::new();
-        let md = "Replace `${YOUR_ENV}` and `$MY_TOKEN` with real values.";
+        let md = "Replace `${YOUR_ENV}` and `$MY_TOKEN` with real values. Login: `$USERNAME`. Args: `$ARGUMENTS`";
         let flagged: Vec<String> = check(md, "README.md", &code, &HashSet::new())
             .iter()
             .filter(|f| f.verdict.is_reportable())

@@ -181,3 +181,79 @@ fn docs_site_content_is_skipped_but_mdx_is_read() {
     docs.sort();
     assert_eq!(docs, ["docs/guide.mdx:1", "www/README.md:1"], "{stdout}");
 }
+
+/// Findings as `doc_path` → `detail` pairs from `--format json` output.
+fn json_findings(out: &std::process::Output) -> Vec<(String, String)> {
+    let json: serde_json::Value =
+        serde_json::from_str(&String::from_utf8_lossy(&out.stdout)).expect("valid JSON");
+    json["findings"]
+        .as_array()
+        .expect("findings array")
+        .iter()
+        .map(|f| {
+            (
+                f["doc_path"].as_str().unwrap_or("").to_string(),
+                f["detail"].as_str().unwrap_or("").to_string(),
+            )
+        })
+        .collect()
+}
+
+#[test]
+fn diff_reports_only_drift_introduced_since_ref() {
+    let fx = Fixture::new(&[
+        ("lib.rs", "pub fn greet() {}\n"),
+        ("scripts/deploy.sh", "echo hi\n"),
+        (
+            "README.md",
+            "# Demo\n\nOld drift: `scripts/gone.sh`.\n\nDeploy with `scripts/deploy.sh`.\n",
+        ),
+    ]);
+    let git = |args: &[&str]| {
+        let ok = Command::new("git")
+            .args(["-c", "user.name=t", "-c", "user.email=t@t", "-C"])
+            .arg(&fx.dir)
+            .args(args)
+            .output()
+            .unwrap()
+            .status
+            .success();
+        assert!(ok, "git {args:?}");
+    };
+    git(&["init", "-q"]);
+    git(&["add", "."]);
+    git(&["commit", "-qm", "base"]);
+    // A code-side change breaks a doc claim without touching the doc.
+    std::fs::remove_file(fx.dir.join("scripts/deploy.sh")).unwrap();
+
+    let out = fx.run(&["check", "--format", "json", "--diff", "HEAD"]);
+    let found = json_findings(&out);
+    assert!(
+        found.iter().any(|(_, d)| d.contains("scripts/deploy.sh")),
+        "{found:?}"
+    );
+    assert!(
+        !found.iter().any(|(_, d)| d.contains("scripts/gone.sh")),
+        "pre-existing drift should be hidden: {found:?}"
+    );
+    assert!(!out.status.success());
+}
+
+#[test]
+fn agent_rule_files_are_checked() {
+    let fx = Fixture::new(&[
+        ("lib.rs", "pub fn greet() {}\n"),
+        (".cursorrules", "Shared helpers live in `src/helpers.rs`.\n"),
+        (".cursor/rules/api.mdc", "Routes are in `src/routes.ts`.\n"),
+    ]);
+    let out = fx.run(&["check", "--format", "json"]);
+    let docs: Vec<String> = json_findings(&out).into_iter().map(|(p, _)| p).collect();
+    assert!(
+        docs.iter().any(|p| p.starts_with(".cursorrules:")),
+        "{docs:?}"
+    );
+    assert!(
+        docs.iter().any(|p| p.starts_with(".cursor/rules/api.mdc:")),
+        "{docs:?}"
+    );
+}

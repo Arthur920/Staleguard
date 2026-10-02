@@ -11,8 +11,8 @@
 </p>
 
 Finds docs that lie about your code: paths, scripts, env vars, flags, and
-symbols your READMEs and `CLAUDE.md` name but the repo no longer has. Local,
-deterministic, tuned for TypeScript.
+symbols your READMEs, `CLAUDE.md`, and agent rules name but the repo no longer
+has. Local, deterministic, tuned for TypeScript.
 
 ## Install
 
@@ -33,4 +33,10 @@ In CI:
 - uses: Arthur920/Staleguard@v0.4.1
 ```
 
-CI baselines, SARIF, pre-commit, and config: [DETAILS.md](DETAILS.md).
+Only drift introduced by a PR or by uncommitted work:
+
+```bash
+staleguard check --diff main
+```
+
+PR gating, the Claude Code hook, SARIF, pre-commit, and config: [DETAILS.md](DETAILS.md).

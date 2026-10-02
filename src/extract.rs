@@ -104,6 +104,8 @@ const PATH_EXTS: &[&str] = &[
     "zig",
     "md",
     "markdown",
+    "mdx",
+    "mdc",
     "rst",
     "adoc",
     "txt",
