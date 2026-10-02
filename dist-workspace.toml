@@ -17,5 +17,7 @@ publish-jobs = ["homebrew", "npm"]
 targets = ["aarch64-apple-darwin", "aarch64-unknown-linux-gnu", "x86_64-apple-darwin", "x86_64-unknown-linux-gnu", "x86_64-pc-windows-msvc"]
 # Path that installers should place binaries in
 install-path = "CARGO_HOME"
+# release.yml's publish-npm job is hand-edited for npm trusted publishing (OIDC)
+allow-dirty = ["ci"]
 # Whether to install an updater program
 install-updater = false
