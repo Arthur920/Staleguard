@@ -5,7 +5,6 @@ mod claim;
 mod code;
 mod commands;
 mod config;
-mod drift;
 mod entrypoints;
 mod extract;
 mod findings;
@@ -45,7 +44,6 @@ Examples:
   staleguard check --diff main      only drift introduced since main
   staleguard check --format json    machine-readable findings (exits non-zero on drift)
   staleguard check --format sarif   SARIF for GitHub code scanning / PR annotations
-  staleguard check --write-ledger   set the CI alignment baseline on the base branch
 
 Run `staleguard <command> --help` for per-command options.";
 
@@ -63,13 +61,6 @@ enum Commands {
         /// `HEAD` for uncommitted work); findings already present there are hidden.
         #[arg(long)]
         diff: Option<String>,
-        /// Persist the drift ledger + alignment score under `.staleguard/` (run this
-        /// on the base branch to set the CI baseline).
-        #[arg(long)]
-        write_ledger: bool,
-        /// Fail if the alignment score regressed below the committed baseline.
-        #[arg(long)]
-        fail_on_regression: bool,
         /// Drop findings below this severity (`note` < `warning` < `error`) from
         /// the report, the SARIF, and the failing set. `error` keeps only broken
         /// refs and contradictions.
@@ -236,12 +227,12 @@ pub(crate) fn is_changelog_doc(path: &Path) -> bool {
     })
 }
 
+/// Every reportable finding across the repo's docs.
 fn run_check(
     root: &Path,
-    opts: &drift::Options,
     doc_filter: &[String],
     min_severity: Option<findings::Severity>,
-) -> drift::Outcome {
+) -> Vec<findings::Finding> {
     // Optional `.staleguard.toml`: doc-exclude globs + verdict suppression. A
     // malformed file aborts the run rather than silently dropping a check.
     let settings = settings::Settings::load(root).unwrap_or_else(|e| {
@@ -299,17 +290,16 @@ fn run_check(
             findings.extend(c.check(&doc, &ctx));
         }
     }
+    findings.retain(|f| f.verdict.is_reportable());
     suggest::annotate(&mut findings, root, &repo_files, &code_tokens, &pkg_scripts);
 
     // Verdict suppression from `.staleguard.toml` (e.g. opt out of `unverifiable`).
-    // Applied before the drift pipeline so suppressed findings neither report nor
-    // gate. `Supported` claims are untouched, so the alignment score is unaffected.
     settings.apply_suppression(&mut findings);
     // Severity threshold: the `--min-severity` flag wins, else the config value.
     // Same pre-pipeline placement, so dropped findings neither report nor gate.
     let threshold = min_severity.or(settings.min_severity);
     settings::Settings::apply_severity_threshold(&mut findings, threshold);
-    drift::run(findings, &index, root, opts)
+    findings
 }
 
 /// `--diff <ref>`: keep only drift introduced since `ref`. The same checks run
@@ -328,12 +318,12 @@ fn keep_introduced(
         eprintln!("warning: can't check out `{base}` (shallow clone?); reporting all findings");
         return;
     };
-    let before = run_check(&wt.root, &drift::Options::default(), docs, min_severity);
+    let before = run_check(&wt.root, docs, min_severity);
     let key = |f: &findings::Finding| {
         let file = f.doc_path.rsplit_once(':').map_or(&*f.doc_path, |(p, _)| p);
         (file.to_string(), f.claim.clone())
     };
-    let known: std::collections::HashSet<_> = before.findings.iter().map(key).collect();
+    let known: std::collections::HashSet<_> = before.iter().map(key).collect();
     let total = findings.len();
     findings.retain(|f| !known.contains(&key(f)));
     let hidden = total - findings.len();
@@ -349,24 +339,16 @@ fn main() -> ExitCode {
             path,
             format,
             diff,
-            write_ledger,
-            fail_on_regression,
             min_severity,
             docs,
         } => {
             let root = std::fs::canonicalize(&path).unwrap_or(path);
-            let opts = drift::Options {
-                diff_ref: diff,
-                write_ledger,
-                fail_on_regression,
-            };
-            let mut out = run_check(&root, &opts, &docs, min_severity);
-            if let Some(base) = &opts.diff_ref {
-                keep_introduced(&root, base, &docs, min_severity, &mut out.findings);
+            let mut findings = run_check(&root, &docs, min_severity);
+            if let Some(base) = &diff {
+                keep_introduced(&root, base, &docs, min_severity, &mut findings);
             }
-            report::report_check(&out, format);
-            // Fail on any reportable finding, or on a score regression in CI.
-            if out.findings.is_empty() && out.regression.is_none() {
+            report::report_check(&findings, format);
+            if findings.is_empty() {
                 ExitCode::SUCCESS
             } else {
                 ExitCode::FAILURE
@@ -386,6 +368,7 @@ mod tests {
             "design/DOCUMENTATION_AUDIT_REPORT.md",
             "design/audit/findings.md",
             "x/UNNECESSARY_DOCS_REPORT.md",
+            ".agents/plans/calm-violet-tide.md",
         ] {
             assert!(is_changelog_doc(Path::new(p)), "{p}");
         }

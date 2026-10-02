@@ -3,7 +3,7 @@
 //! These are the substrate every designed feature reads from: coverage gaps,
 //! diagram edge-diff, architecture rules, drift provenance/fingerprints.
 
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 
 /// What kind of definition a [`Symbol`] is. Tag kind names differ per grammar;
 /// unrecognized ones are preserved in `Other` rather than dropped.
@@ -42,39 +42,6 @@ pub struct Span {
     pub end_line: usize,
 }
 
-impl Span {
-    /// An empty span for synthetic test symbols.
-    #[cfg(test)]
-    pub fn zero() -> Span {
-        Span {
-            path: String::new(),
-            start_line: 0,
-            end_line: 0,
-        }
-    }
-}
-
-/// Behavioral facts: the deterministic, model-free fingerprint of a symbol's
-/// meaning. The drift layer hashes these (see `crate::code::facts::facts_hash`)
-/// and flags a claim when the hash moves from its committed baseline, catching
-/// small-token/high-semantic edits (`3 -> 5`, `if -> if !`) while ignoring
-/// renames. Multi-valued fields are sorted + deduped so the hash is
-/// order-independent.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Facts {
-    /// Literal constants in the symbol's body (numbers, strings, bools).
-    pub constants: Vec<String>,
-    /// The declaration line (name, params, types), normalized.
-    #[serde(default)]
-    pub signature: Option<String>,
-    /// Control-flow condition texts (`if`/`while`/`match`/`switch`), normalized.
-    #[serde(default)]
-    pub predicates: Vec<String>,
-    /// Declared return type / shape, if the grammar exposes one.
-    #[serde(default)]
-    pub return_shape: Option<String>,
-}
-
 /// A code definition.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Symbol {
@@ -88,12 +55,7 @@ pub struct Symbol {
     pub module: String,
     /// Name range (identifier position), used by reports and coverage.
     pub span: Span,
-    /// Full definition range (covers the body). Drift maps git hunks to symbols
-    /// by overlapping changed line ranges against this. Defaults to `span` for
-    /// synthetic symbols that don't set it.
-    pub body_span: Span,
     pub signature: Option<String>,
     /// leading-comment documentation captured by the tags query, if any.
     pub doc: Option<String>,
-    pub facts: Facts,
 }

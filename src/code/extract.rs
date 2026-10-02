@@ -6,7 +6,6 @@ use std::path::Path;
 use tree_sitter::{Node, Parser, Tree};
 use tree_sitter_tags::TagsContext;
 
-use crate::code::facts;
 use crate::code::lang::{self, Language};
 use crate::code::symbol::{Span, Symbol, SymbolKind, Visibility};
 
@@ -63,7 +62,7 @@ fn symbols(
     let lines: Vec<&str> = text.lines().collect();
 
     // Tags give byte ranges (`tag.range`) but not AST nodes; each definition's
-    // node is resolved by byte range below for behavioral facts and body span.
+    // node is resolved by byte range below to correct enum kinds.
     let mut symbols = Vec::new();
     for tag in tags {
         let Ok(tag) = tag else { continue };
@@ -82,24 +81,9 @@ fn symbols(
             start_line: start_row + 1,
             end_line: tag.span.end.row + 1,
         };
-        // Resolve the definition node (covers the body) for facts + body_span.
         let def_node = root.and_then(|r| {
             r.descendant_for_byte_range(tag.range.start, tag.range.end.saturating_sub(1))
         });
-        let (body_span, fact_data) = match def_node {
-            Some(node) => (
-                Span {
-                    path: rel.to_string(),
-                    start_line: node.start_position().row + 1,
-                    end_line: node.end_position().row + 1,
-                },
-                facts::extract(node, source, language, decl_line.clone()),
-            ),
-            None => (
-                span.clone(),
-                facts::extract_signature_only(decl_line.clone()),
-            ),
-        };
 
         // tree-sitter-tags collapses enums into the `class` tag kind, so detect
         // them from the AST node and correct the kind.
@@ -116,10 +100,8 @@ fn symbols(
             visibility,
             module: module.to_string(),
             span,
-            body_span,
             signature: decl_line,
             doc: tag.docs.clone(),
-            facts: fact_data,
         });
     }
     symbols

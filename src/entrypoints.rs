@@ -179,7 +179,7 @@ fn qualified_re() -> &'static Regex {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::code::symbol::{Facts, Span, Symbol, SymbolKind, Visibility};
+    use crate::code::symbol::{Span, Symbol, SymbolKind, Visibility};
 
     fn sym(name: &str, qualified: &str, module: &str) -> Symbol {
         Symbol {
@@ -193,10 +193,8 @@ mod tests {
                 start_line: 1,
                 end_line: 1,
             },
-            body_span: Span::zero(),
             signature: None,
             doc: None,
-            facts: Facts::default(),
         }
     }
 

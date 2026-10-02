@@ -9,7 +9,7 @@ inputs:
   args:
     description: >-
       Extra arguments passed to `staleguard check` (e.g.
-      "--fail-on-regression" or "--doc README.md").
+      "--diff origin/main" or "--doc README.md").
     required: false
     default: ""
   working-directory:

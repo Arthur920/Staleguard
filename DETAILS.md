@@ -27,17 +27,13 @@ Paths, commands, and env vars are checked the same way in any repo. Symbol
 grounding parses TypeScript/JavaScript (the tuned target) plus Rust, Python,
 and Java on a best-effort basis.
 
-**Drift over time**
-- `--diff <ref>` reports only drift introduced since a git ref, whether a doc
-  edit or a code change (a deleted file, a removed script) caused it
-- a per-module and repo-wide **alignment score**, with a CI **regression gate**
-- fingerprint staleness: a previously-verified claim is flagged when the code
-  behind it changes
+**New drift only.** `--diff <ref>` reports only drift introduced since a git
+ref, whether a doc edit or a code change (a deleted file, a removed script)
+caused it. It runs the same checks on a temporary checkout of `<ref>` and
+hides findings already present there.
 
 Everything is deterministic and tuned to under-report rather than false-alarm:
 a finding always points at a concrete path, command, env var, flag, or symbol.
-Underneath sits a **drift ledger**: it makes runs incremental, scores
-alignment, and gates CI on regressions.
 
 ## Commands
 
@@ -49,7 +45,7 @@ staleguard check --doc README.md # restrict to one doc
 ```
 
 Output is `text` (human) or `json` (machine-readable). `check` exits non-zero on
-any reportable finding or a score regression, so it drops into CI as is.
+any reportable finding, so it drops into CI as is.
 
 ## CI
 
@@ -64,12 +60,7 @@ Fail a PR only on drift it introduces. This needs the base branch fetched:
     args: --diff origin/${{ github.base_ref }}
 ```
 
-Or commit a baseline on the main branch and gate on the alignment score:
-
-```bash
-staleguard check --write-ledger        # once, on main; writes .staleguard/
-staleguard check --fail-on-regression  # on each PR
-```
+Without `--diff`, every finding in the repo fails the check.
 
 **GitHub Action.** Inputs: `args`, `format` (`text`/`json`/`sarif`), `version`,
 `working-directory`. For inline PR annotations, emit SARIF and upload it:
@@ -107,14 +98,11 @@ suppress = ["unverifiable"]               # contradicted | stale | unverifiable
 min_severity = "error"                    # note < warning < error; --min-severity overrides
 ```
 
-Suppressed and filtered claims drop out of the alignment score's denominator, so
-the score describes what you chose to check.
-
 ## Agents
 
 Stale agent instructions are worse than stale READMEs: the agent runs the
 dead command and edits the moved path. To make Claude Code check its own
-changes before it finishes, add a `Stop` hook to `.claude/settings.json`:
+changes before it finishes, add a `Stop` hook to your `.claude/settings.json`:
 
 ```json
 {

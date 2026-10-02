@@ -275,6 +275,11 @@ pub fn extract_path_claims(markdown: &str, doc_path: &str) -> Vec<PathClaim> {
             if !looks_like_path(token) {
                 continue;
             }
+            // "your `.claude/settings.json`": a file in the reader's project.
+            let before = line[..cap.get(0).unwrap().start()].trim_end();
+            if before.to_ascii_lowercase().ends_with("your") {
+                continue;
+            }
             claims.push(PathClaim {
                 raw: token.to_string(),
                 doc_path: doc_path.to_string(),
@@ -304,6 +309,12 @@ mod tests {
         assert!(got.contains(&"src/main.py".to_string()));
         assert!(got.contains(&"docs/usage/custom.md".to_string()));
         assert!(got.contains(&"pydantic-core/Makefile".to_string()));
+    }
+
+    #[test]
+    fn readers_own_files_are_not_claims() {
+        let got = raws("Add a hook to your `.claude/settings.json`; see `src/main.py`.");
+        assert_eq!(got, ["src/main.py"]);
     }
 
     #[test]

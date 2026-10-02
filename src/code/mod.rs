@@ -4,7 +4,6 @@
 //! provenance/fingerprints (`drift`).
 
 mod extract;
-pub mod facts;
 pub mod lang;
 pub mod symbol;
 

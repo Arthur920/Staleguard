@@ -79,8 +79,6 @@ fn check_env_vars(
         let doc_ref = format!("{doc_path}:{line}");
         let claim = format!("references env var `{name}`");
         if code_tokens.contains(&name) {
-            // Token-grounded (no single owning symbol) → empty provenance, so it
-            // is always re-checked rather than carried forward. Safe by default.
             findings.push(Finding::supported(claim, doc_ref, Provenance::default()));
         } else {
             findings.push(Finding::problem(

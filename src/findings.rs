@@ -1,10 +1,8 @@
 //! Shared finding type used by every layer.
 //!
-//! A `Finding` doubles as a *claim record*: it carries the doc assertion, the
-//! [`Provenance`] it is anchored to in code, and a [`Verdict`]. A `Supported`
-//! finding is a claim that verified; it is recorded in the drift ledger and
-//! counted in the alignment score, but filtered out of the human report. Every
-//! other verdict is a reportable problem.
+//! A `Finding` carries the doc assertion, the [`Provenance`] it is anchored to
+//! in code, and a [`Verdict`]. A `Supported` finding is a claim that verified
+//! and is dropped before output; every other verdict is a reportable problem.
 
 use serde::{Deserialize, Serialize};
 
@@ -58,8 +56,7 @@ impl Verdict {
         }
     }
 
-    /// Whether this verdict is shown in the human report. `Supported` claims are
-    /// ledgered and scored but not reported.
+    /// Whether this verdict is reported. `Supported` claims are not.
     pub fn is_reportable(&self) -> bool {
         !matches!(self, Verdict::Supported)
     }
@@ -89,8 +86,8 @@ pub struct Finding {
     pub layer: u8,
     /// supporting / conflicting code references
     pub code_refs: Vec<String>,
-    /// what the claim is anchored to in code (for drift lineage). Defaults to
-    /// empty so older serialized findings still deserialize.
+    /// what the claim is anchored to in code. Defaults to empty so older
+    /// serialized findings still deserialize.
     #[serde(default)]
     pub provenance: Provenance,
 }
@@ -115,7 +112,7 @@ impl Finding {
         }
     }
 
-    /// A claim that verified. Recorded + scored, never reported.
+    /// A claim that verified. Never reported.
     pub fn supported(
         claim: impl Into<String>,
         doc_path: impl Into<String>,

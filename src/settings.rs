@@ -76,22 +76,20 @@ impl Settings {
             .collect()
     }
 
-    /// Drop findings whose verdict is suppressed. `Supported` claims are never
-    /// suppressible (they feed the alignment score, not the report).
+    /// Drop findings whose verdict is suppressed.
     pub fn apply_suppression(&self, findings: &mut Vec<Finding>) {
         let drop = self.suppressed();
         if drop.is_empty() {
             return;
         }
-        findings.retain(|f| f.verdict == Verdict::Supported || !drop.contains(&f.verdict));
+        findings.retain(|f| !drop.contains(&f.verdict));
     }
 
-    /// Drop reportable findings whose severity is below `threshold`. `Supported`
-    /// claims are kept regardless (they feed the score, not the report). A `None`
+    /// Drop reportable findings whose severity is below `threshold`. A `None`
     /// threshold is a no-op.
     pub fn apply_severity_threshold(findings: &mut Vec<Finding>, threshold: Option<Severity>) {
         let Some(min) = threshold else { return };
-        findings.retain(|f| f.verdict == Verdict::Supported || f.verdict.severity() >= min);
+        findings.retain(|f| f.verdict.severity() >= min);
     }
 }
 
@@ -137,7 +135,6 @@ fn glob_to_regex(pattern: &str) -> Regex {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::claim::Provenance;
 
     #[test]
     fn default_excludes_nothing() {
@@ -180,7 +177,7 @@ mod tests {
     }
 
     #[test]
-    fn suppression_drops_named_verdicts_but_keeps_supported() {
+    fn suppression_drops_named_verdicts() {
         let s = Settings {
             exclude: vec![],
             suppress: vec!["unverifiable".into()],
@@ -189,26 +186,21 @@ mod tests {
         let mut findings = vec![
             Finding::problem(Verdict::Unverifiable, "c", "a.rs", "d"),
             Finding::problem(Verdict::Stale, "c", "README.md:1", "d"),
-            Finding::supported("c", "README.md:2", Provenance::default()),
         ];
         s.apply_suppression(&mut findings);
-        assert_eq!(findings.len(), 2);
-        assert!(findings.iter().all(|f| f.verdict != Verdict::Unverifiable));
-        assert!(findings.iter().any(|f| f.verdict == Verdict::Supported));
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].verdict, Verdict::Stale);
     }
 
     #[test]
-    fn severity_threshold_drops_below_but_keeps_supported() {
+    fn severity_threshold_drops_below() {
         let mut findings = vec![
             Finding::problem(Verdict::Unverifiable, "c", "b.md:1", "d"), // warning
             Finding::problem(Verdict::Stale, "c", "c.md:1", "d"),        // error
-            Finding::supported("c", "d.md:2", Provenance::default()),
         ];
         Settings::apply_severity_threshold(&mut findings, Some(Severity::Error));
-        // Warning dropped; error kept; supported kept.
-        assert!(findings.iter().all(|f| f.verdict != Verdict::Unverifiable));
-        assert!(findings.iter().any(|f| f.verdict == Verdict::Stale));
-        assert!(findings.iter().any(|f| f.verdict == Verdict::Supported));
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].verdict, Verdict::Stale);
     }
 
     #[test]
