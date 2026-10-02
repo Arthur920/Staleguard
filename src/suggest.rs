@@ -67,8 +67,10 @@ fn renamed(raw: &str, root: &Path, renames: &HashMap<String, String>) -> Option<
     root.join(&cur).exists().then_some(cur)
 }
 
-/// The single tracked repo file sharing the missing path's file name. Short
-/// generic stems (`api.ts`, `index.ts`) are too common to guess from.
+/// The tracked repo file sharing the missing path's file name: the only one, or
+/// the one whose directories share the most words with the doc's path
+/// (`routers/teams/x.ts` → `team-router/x.ts`). Short generic stems (`api.ts`,
+/// `index.ts`) are too common to guess from.
 fn same_name(raw: &str, root: &Path, repo_files: &[String]) -> Option<String> {
     let p = Path::new(raw);
     if p.file_stem()?.len() < 6 {
@@ -92,7 +94,37 @@ fn same_name(raw: &str, root: &Path, repo_files: &[String]) -> Option<String> {
         let ignored = crate::git::ignored(root, &hits);
         hits.retain(|h| !ignored.contains(h));
     }
-    (hits.len() == 1).then(|| hits.remove(0))
+    if hits.len() == 1 {
+        return hits.pop();
+    }
+    let want = dir_words(raw);
+    let mut scored: Vec<(usize, String)> = hits
+        .into_iter()
+        .map(|h| (dir_words(&h).intersection(&want).count(), h))
+        .collect();
+    scored.sort_by_key(|s| std::cmp::Reverse(s.0));
+    match scored.as_slice() {
+        [(best, h), rest @ ..] if *best > 0 && rest.first().is_none_or(|r| r.0 < *best) => {
+            Some(h.clone())
+        }
+        _ => None,
+    }
+}
+
+/// Lowercased words of a path's directories, plural `s` dropped, so `teams`
+/// and `team-router` share `team`.
+fn dir_words(path: &str) -> HashSet<String> {
+    let dir = Path::new(path)
+        .parent()
+        .map(|p| p.to_string_lossy().into_owned());
+    dir.unwrap_or_default()
+        .split(['/', '-', '_', '.'])
+        .filter(|w| !w.is_empty())
+        .map(|w| {
+            let w = w.to_ascii_lowercase();
+            w.strip_suffix('s').map(str::to_string).unwrap_or(w)
+        })
+        .collect()
 }
 
 /// The candidate nearest to `name` by edit distance, within a third of its
@@ -177,6 +209,23 @@ mod tests {
         assert!(fs[3]
             .detail
             .ends_with("did you mean `src/unit/Dhl.spec.ts`?"));
+    }
+
+    #[test]
+    fn same_name_breaks_ties_by_directory_words() {
+        let files: Vec<String> = [
+            "packages/lib/server-only/team/create-team.ts",
+            "packages/trpc/server/team-router/create-team.ts",
+        ]
+        .map(String::from)
+        .into();
+        let root = Path::new("/nonexistent");
+        assert_eq!(
+            same_name("routers/teams/create-team.ts", root, &files).as_deref(),
+            Some("packages/trpc/server/team-router/create-team.ts")
+        );
+        // No shared words: no guess.
+        assert_eq!(same_name("other/create-team.ts", root, &files), None);
     }
 
     #[test]
