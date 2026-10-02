@@ -3,10 +3,10 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Staleguard: guard your docs against drift</title>
-<meta name="description" content="Staleguard catches documentation drift: places where your CLAUDE.md, READMEs, and docs claim something the code no longer backs up. It runs locally and offline and is tuned for zero false positives.">
+<title>Staleguard: keep your agent instructions true</title>
+<meta name="description" content="Staleguard finds the paths, scripts, and env vars your CLAUDE.md, AGENTS.md, agent rules, and READMEs name but the code no longer has. Local, offline, deterministic.">
 <meta property="og:title" content="Staleguard">
-<meta property="og:description" content="Catch documentation drift, fully local and offline. Deterministic and tuned for zero false positives.">
+<meta property="og:description" content="Catch documentation drift, fully local and offline. Deterministic and tuned to under-report rather than false-alarm.">
 <meta property="og:image" content="staleguard.png">
 <link rel="icon" type="image/png" href="favicon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -360,11 +360,6 @@
     .l1-flow { grid-template-columns: 1fr; }
     .l1-step + .l1-step { border-left: none; border-top: 1px solid var(--edge); }
   }
-  .ledger-note {
-    font-family: "JetBrains Mono", monospace; font-size: 0.78rem;
-    color: var(--ash); text-align: center; margin-top: 26px; letter-spacing: 0.04em;
-  }
-  .ledger-note b { color: var(--brass); font-weight: 500; }
 
   /* ---------- features ---------- */
   .feat-grid {
@@ -488,10 +483,10 @@
 <header id="top" class="wrap hero">
   <div class="hero-bg"></div>
   <div class="hero-copy">
-    <div class="hero-tag stagger"><span class="dot"></span><span>fully local · offline · zero false positives</span></div>
+    <div class="hero-tag stagger"><span class="dot"></span><span>fully local · offline · deterministic</span></div>
     <h1 class="stagger">Stale<span class="em">guard</span></h1>
-    <div class="hero-sub stagger">Guard your docs against drift</div>
-    <p class="hero-desc stagger">Catches the places where your <strong>CLAUDE.md</strong>, READMEs, and <code>*.md</code> docs claim something the code no longer backs up. Checks docs against the <strong>actual codebase</strong> and reports what's stale, wrong, or missing.</p>
+    <div class="hero-sub stagger">Keep your agent instructions true</div>
+    <p class="hero-desc stagger">When the code moves on, a stale <strong>CLAUDE.md</strong> or <strong>AGENTS.md</strong> makes your agent run the dead command and edit the moved file, every session. Staleguard finds those lines, and the same lies in your READMEs, by checking them against the <strong>actual codebase</strong>.</p>
     <div class="install-line stagger">
       <code><span class="sigil">$ </span>brew install Arthur920/tap/staleguard</code>
       <button class="copy-btn" data-copy="brew install Arthur920/tap/staleguard">COPY</button>
@@ -509,14 +504,14 @@
 <section id="layers" class="wrap">
   <p class="eyebrow reveal">The architecture</p>
   <h2 class="section-title reveal">Deterministic, from docs to verdict</h2>
-  <p class="section-lead reveal">No models, no network: every check is deterministic, instant, and tuned for zero false positives. Everything runs locally, and code never leaves the machine.</p>
+  <p class="section-lead reveal">No models, no network: every check is deterministic, instant, and tuned to under-report rather than false-alarm. Everything runs locally, and code never leaves the machine.</p>
 
   <div class="layers-grid stagger">
     <div class="layer l1">
       <div class="layer-num">I</div>
       <div class="layer-body">
         <h3>Deterministic</h3>
-        <p>Paths exist? Commands real? Env vars and flags read? Code symbols defined? It uses no ML and is tuned for zero false positives.</p>
+        <p>Paths exist? Commands real? Env vars and flags read? Code symbols defined? It uses no ML, and every finding names a concrete path, script, env var, or symbol.</p>
       </div>
       <div class="layer-meta">instant · no model<span class="accent">~1.2s on 330k LOC</span></div>
     </div>
@@ -526,7 +521,7 @@
     <div class="l1-step">
       <div class="k"><b>01</b>Read docs</div>
       <h4>Extract claims</h4>
-      <p>Scan every <code>*.md</code> for concrete assertions: paths, commands, env vars, flags, and code symbols.</p>
+      <p>Scan every doc and agent rule for concrete assertions: paths, commands, env vars, flags, and code symbols.</p>
     </div>
     <div class="l1-step">
       <div class="k"><b>02</b>Read code</div>
@@ -544,8 +539,6 @@
       <p>Emit a finding only when the code contradicts the doc, each with the exact doc reference and code anchor.</p>
     </div>
   </div>
-
-  <p class="ledger-note reveal">Underneath sits a <b>drift ledger</b> that makes runs incremental, scores alignment, and gates CI on regressions.</p>
 </section>
 
 <div class="divider"></div>
@@ -553,7 +546,7 @@
 <!-- DETECT -->
 <section id="detect" class="wrap">
   <p class="eyebrow reveal">What it catches</p>
-  <h2 class="section-title reveal">Three classes of documentation drift</h2>
+  <h2 class="section-title reveal">What a stale doc looks like</h2>
 
   <div class="feat-grid stagger">
     <div class="feat">
@@ -567,20 +560,19 @@
       </ul>
     </div>
     <div class="feat">
-      <span class="glyph">// COVERAGE</span>
-      <h3>Coverage gaps</h3>
+      <span class="glyph">// AGENTS</span>
+      <h3>Agent instructions</h3>
       <ul>
-        <li>public code surface that no doc describes</li>
-        <li>risk-ranked by fan-in, churn, and complexity</li>
+        <li><code>CLAUDE.md</code>, <code>AGENTS.md</code>, Cursor / Windsurf / Cline rules</li>
+        <li>slash commands and skills that point at missing files</li>
       </ul>
     </div>
     <div class="feat">
       <span class="glyph">// DRIFT</span>
-      <h3>Drift over time</h3>
+      <h3>Only new drift</h3>
       <ul>
-        <li><code>--diff &lt;ref&gt;</code> re-checks only what changed</li>
-        <li>per-module &amp; repo-wide alignment score</li>
-        <li>CI regression gate; fingerprint staleness</li>
+        <li><code>--diff &lt;ref&gt;</code> reports only drift introduced since a ref</li>
+        <li>caught whether the doc or the code changed</li>
       </ul>
     </div>
   </div>
@@ -595,7 +587,7 @@
   <div class="tabs reveal">
     <button class="tab active" data-tab="t-install">Install</button>
     <button class="tab" data-tab="t-ci">CI gate</button>
-    <button class="tab" data-tab="t-agent">Agents / MCP</button>
+    <button class="tab" data-tab="t-agent">Agents</button>
   </div>
 
   <div class="panel active" id="t-install">
@@ -606,6 +598,9 @@ staleguard check">COPY</button></div>
       <pre><span class="cm"># Homebrew (macOS / Linux)</span>
 <span class="sigil">$ </span><span class="cmd">brew install</span> Arthur920/tap/staleguard
 
+<span class="cm"># or with npm</span>
+<span class="sigil">$ </span><span class="cmd">npx</span> staleguard check
+
 <span class="cm"># or from source</span>
 <span class="sigil">$ </span><span class="cmd">cargo install</span> <span class="flag">--git</span> https://github.com/Arthur920/Staleguard
 
@@ -614,28 +609,22 @@ staleguard check">COPY</button></div>
   </div>
 
   <div class="panel" id="t-ci">
-    <p class="lead"><code>staleguard check</code> exits non-zero on any finding or a score regression, so it drops into any pipeline. Commit a baseline on main, then gate PRs against it.</p>
+    <p class="lead"><code>staleguard check</code> exits non-zero on any finding. With <code>--diff</code>, a PR fails only on drift it introduces.</p>
     <div class="code-block">
-      <div class="bar"><div class="lights"><i></i><i></i><i></i></div><span class="title">.github/workflows</span><button class="copy-btn" data-copy="staleguard check --write-ledger
-staleguard check --fail-on-regression --format json">COPY</button></div>
-      <pre><span class="cm"># once, on the base branch: records the alignment baseline</span>
-<span class="sigil">$ </span><span class="cmd">staleguard check</span> <span class="flag">--write-ledger</span>
-
-<span class="cm"># in CI on each PR: fail only if alignment regressed</span>
-<span class="sigil">$ </span><span class="cmd">staleguard check</span> <span class="flag">--fail-on-regression</span> <span class="flag">--format</span> json</pre>
+      <div class="bar"><div class="lights"><i></i><i></i><i></i></div><span class="title">.github/workflows</span><button class="copy-btn" data-copy="staleguard check --diff origin/main">COPY</button></div>
+      <pre><span class="cm"># in CI on each PR (checkout with fetch-depth: 0)</span>
+<span class="sigil">$ </span><span class="cmd">staleguard check</span> <span class="flag">--diff</span> origin/main</pre>
     </div>
   </div>
 
   <div class="panel" id="t-agent">
-    <p class="lead">Staleguard speaks <code>--format json</code>, so any coding agent can run it and read findings back, either directly through the shell or exposed as an MCP <code>check_doc_drift</code> tool.</p>
+    <p class="lead">A Claude Code <code>Stop</code> hook makes the agent check its own changes before it finishes, and fix any drift it introduced. Other agents can run <code>--format json</code> and read the findings back.</p>
     <div class="code-block">
-      <div class="bar"><div class="lights"><i></i><i></i><i></i></div><span class="title">agent</span><button class="copy-btn" data-copy="staleguard check --format json --diff main">COPY</button></div>
-      <pre><span class="cm"># let the agent call it directly</span>
-<span class="sigil">$ </span><span class="cmd">staleguard check</span> <span class="flag">--format</span> json <span class="flag">--diff</span> main
+      <div class="bar"><div class="lights"><i></i><i></i><i></i></div><span class="title">agent</span><button class="copy-btn" data-copy="staleguard check --diff HEAD &gt;&amp;2 || exit 2">COPY</button></div>
+      <pre><span class="cm"># .claude/settings.json → hooks.Stop[].hooks[].command</span>
+<span class="sigil">$ </span><span class="cmd">staleguard check</span> <span class="flag">--diff</span> HEAD &gt;&amp;2 || exit 2
 
-<span class="cm"># a good standing instruction in CLAUDE.md:</span>
-<span class="cm">#   "After editing code or docs, run staleguard check</span>
-<span class="cm">#    --format json and fix any reported drift."</span></pre>
+<span class="cm"># exit 2 hands the findings back to Claude, which fixes them</span></pre>
     </div>
   </div>
 

@@ -10,33 +10,55 @@
   <a href="LICENSE"><img src="https://img.shields.io/github/license/Arthur920/Staleguard?color=green" alt="License: MIT"></a>
 </p>
 
-Finds docs that lie about your code: paths, scripts, env vars, flags, and
-symbols your READMEs, `CLAUDE.md`, and agent rules name but the repo no longer
-has. Local, deterministic, tuned for TypeScript.
+Keeps your agent instructions true. `CLAUDE.md`, `AGENTS.md`, Cursor rules,
+and slash commands name paths, scripts, and env vars. When the code moves on,
+the agent keeps running the dead command and editing the moved file, every
+session. Staleguard finds those lines, and the same lies in your READMEs.
+Local, deterministic, tuned for TypeScript.
+
+```text
+.opencode/commands/create-plan.md
+   10  path `.agents/skills/create-plan/SKILL.md` does not exist
+   14  path `scripts/create-plan.ts` does not exist
+
+AGENTS.md
+   45  path `routers/teams/create-team.types.ts` does not exist; did you mean `packages/trpc/server/team-router/create-team.types.ts`?
+```
 
 ## Install
 
 ```bash
-brew install Arthur920/tap/staleguard
+npx staleguard check
+# or: brew install Arthur920/tap/staleguard
 # or: cargo install --git https://github.com/Arthur920/Staleguard
 ```
 
-## Use
+## Let the agent check itself
 
-```bash
-staleguard check
+Add a `Stop` hook to your `.claude/settings.json`. Before Claude Code finishes, it
+sees any drift its own changes introduced and fixes it:
+
+```json
+{
+  "hooks": {
+    "Stop": [
+      { "hooks": [{ "type": "command", "command": "staleguard check --diff HEAD >&2 || exit 2" }] }
+    ]
+  }
+}
 ```
 
-In CI:
+## In CI
+
+Fail a PR only on drift it introduces:
 
 ```yaml
+- uses: actions/checkout@v4
+  with:
+    fetch-depth: 0
 - uses: Arthur920/Staleguard@v0.4.1
+  with:
+    args: --diff origin/${{ github.base_ref }}
 ```
 
-Only drift introduced by a PR or by uncommitted work:
-
-```bash
-staleguard check --diff main
-```
-
-PR gating, the Claude Code hook, SARIF, pre-commit, and config: [DETAILS.md](DETAILS.md).
+SARIF, pre-commit, config, and what exactly is checked: [DETAILS.md](DETAILS.md).
