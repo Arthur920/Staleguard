@@ -1,0 +1,2 @@
+examples/next-prisma-websockets-starter/README.md:61  script `test:unit` is not defined; did you mean `test-unit`?
+packages/upgrade/README.md:17  script `trpc-upgrade` is not defined

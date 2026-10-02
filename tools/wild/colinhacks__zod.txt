@@ -1,0 +1,3 @@
+packages/docs-v3/CONTRIBUTING.md:43  script `play` is not defined
+packages/docs-v3/CONTRIBUTING.md:70  script `play` is not defined
+packages/docs-v3/ERROR_HANDLING.md:197  path `src/errors.ts` does not exist

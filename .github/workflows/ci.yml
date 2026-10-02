@@ -33,7 +33,7 @@ jobs:
         run: cargo test
 
   doc-coherence:
-    name: staleguard self-check (Layer 1)
+    name: staleguard self-check
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -47,11 +47,24 @@ jobs:
       - name: Install staleguard
         run: cargo install --path .
 
-      # Advisory: dogfood staleguard on its own prose docs. Scoped to the docs so it
-      # checks doc-vs-code drift (broken refs, contradictions, stale claims) and
-      # skips the repo-wide coverage pass. Non-blocking because the docs mention
-      # example filenames (package.json, CLAUDE.md) that exist in *user* repos,
-      # not this one; findings are surfaced in the log without gating CI.
       - name: Check docs against code
-        run: staleguard check --doc README.md --doc DETAILS.md --format json
-        continue-on-error: true
+        run: staleguard check
+
+  wild:
+    name: precision on pinned OSS repos
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      # Fails when findings on tools/wild_pins.txt change. Read the diff for new
+      # false positives, then refresh with `wild_check.py BIN --update`.
+      - name: Compare findings to snapshots
+        run: |
+          cargo build --release
+          python3 tools/wild_check.py target/release/staleguard

@@ -1,0 +1,8 @@
+# Repos for tools/wild_check.py, pinned so their findings only change when
+# staleguard does. Every finding in tools/wild/ was hand-checked (2026-10-02):
+# all real drift except documenso's `TEST_VALUES` (a constant the doc tells the
+# reader to define).
+documenso/documenso 8a41a3bf618d9e46e2e1c0f437aa0488d91b85de
+trpc/trpc 985b76975416fa6b9fdf1e643fdefe6f80b153fc
+colinhacks/zod 0b216ef674e297ebe41d8bf902262e56f8755822
+t3-oss/create-t3-app 4709861f7e67a15564c0460c13e7b4b6cfcae40d

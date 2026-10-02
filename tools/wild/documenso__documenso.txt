@@ -1,0 +1,12 @@
+.agents/skills/envelope-editor-v2-e2e/SKILL.md:354  `TEST_VALUES` appears nowhere in the code
+.opencode/commands/create-justification.md:10  path `.agents/skills/create-justification/SKILL.md` does not exist
+.opencode/commands/create-justification.md:14  path `scripts/create-justification.ts` does not exist
+.opencode/commands/create-justification.md:22  path `.agents/skills/create-justification/SKILL.md` does not exist
+.opencode/commands/create-plan.md:10  path `.agents/skills/create-plan/SKILL.md` does not exist
+.opencode/commands/create-plan.md:14  path `scripts/create-plan.ts` does not exist
+.opencode/commands/create-plan.md:22  path `.agents/skills/create-plan/SKILL.md` does not exist
+.opencode/commands/create-scratch.md:10  path `.agents/skills/create-scratch/SKILL.md` does not exist
+.opencode/commands/create-scratch.md:14  path `scripts/create-scratch.ts` does not exist
+.opencode/commands/create-scratch.md:22  path `.agents/skills/create-scratch/SKILL.md` does not exist
+AGENTS.md:44  path `routers/teams/create-team.ts` does not exist
+AGENTS.md:45  path `routers/teams/create-team.types.ts` does not exist; did you mean `packages/trpc/server/team-router/create-team.types.ts`?
