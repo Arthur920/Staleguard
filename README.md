@@ -56,7 +56,7 @@ Fail a PR only on drift it introduces:
 - uses: actions/checkout@v4
   with:
     fetch-depth: 0
-- uses: Arthur920/Staleguard@v0.4.1
+- uses: Arthur920/Staleguard@v0.5.0
   with:
     args: --diff origin/${{ github.base_ref }}
 ```

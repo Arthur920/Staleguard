@@ -55,7 +55,7 @@ Fail a PR only on drift it introduces. This needs the base branch fetched:
 - uses: actions/checkout@v4
   with:
     fetch-depth: 0
-- uses: Arthur920/Staleguard@v0.4.1
+- uses: Arthur920/Staleguard@v0.5.0
   with:
     args: --diff origin/${{ github.base_ref }}
 ```
@@ -66,7 +66,7 @@ Without `--diff`, every finding in the repo fails the check.
 `working-directory`. For inline PR annotations, emit SARIF and upload it:
 
 ```yaml
-- uses: Arthur920/Staleguard@v0.4.1
+- uses: Arthur920/Staleguard@v0.5.0
   id: staleguard
   with:
     format: sarif
@@ -80,7 +80,7 @@ Without `--diff`, every finding in the repo fails the check.
 
 ```yaml
 - repo: https://github.com/Arthur920/Staleguard
-  rev: v0.4.1
+  rev: v0.5.0
   hooks:
     - id: staleguard
 ```
