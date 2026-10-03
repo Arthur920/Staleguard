@@ -1,7 +1,6 @@
 //! Language-aware code extractor: turns source into symbols.
 //!
-//! Symbols ground qualified doc references (`entrypoints`) and anchor drift
-//! provenance/fingerprints (`drift`).
+//! Symbols ground qualified doc references (`entrypoints`).
 
 mod extract;
 pub mod lang;

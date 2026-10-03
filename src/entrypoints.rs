@@ -193,8 +193,6 @@ mod tests {
                 start_line: 1,
                 end_line: 1,
             },
-            signature: None,
-            doc: None,
         }
     }
 

@@ -300,65 +300,30 @@
   #detect, #install { padding-top: clamp(96px, 12vw, 168px); }
   #detect { padding-bottom: clamp(100px, 12vw, 170px); }
 
-  /* ---------- layers ---------- */
-  .layers-grid { display: grid; gap: 18px; margin-top: 56px; }
-  .layer {
-    display: grid; grid-template-columns: 88px 1fr auto; align-items: center; gap: 28px;
-    background: linear-gradient(180deg, var(--steel), var(--iron));
-    border: 1px solid var(--edge); border-radius: var(--r);
-    padding: 30px 34px; position: relative; overflow: hidden;
-    transition: border-color .3s, transform .3s;
-  }
-  .layer::before {
-    content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px;
-    background: var(--accent, var(--rivet));
-  }
-  .layer:hover { border-color: var(--accent, var(--rivet)); transform: translateX(4px); }
-  .layer-num {
-    font-family: "Cinzel", serif; font-size: 3.2rem; font-weight: 700;
-    color: var(--accent, var(--ash)); line-height: 1; opacity: 0.85;
-  }
-  .layer-body h3 {
-    font-family: "Cinzel", serif; font-size: 1.4rem; font-weight: 600;
-    margin-bottom: 6px; letter-spacing: 0.03em;
-  }
-  .layer-body p { color: var(--ash-2); font-weight: 300; max-width: 58ch; }
-  .layer-meta {
-    font-family: "JetBrains Mono", monospace; font-size: 0.68rem;
-    letter-spacing: 0.12em; text-transform: uppercase; text-align: right;
-    color: var(--ash); white-space: nowrap;
-  }
-  .layer-meta .accent { color: var(--accent); display: block; margin-top: 4px; }
-  .layer.l1 { --accent: var(--good); }
-  @media (max-width: 760px) {
-    .layer { grid-template-columns: 60px 1fr; padding: 24px; gap: 18px; }
-    .layer-num { font-size: 2.4rem; }
-    .layer-meta { display: none; }
-  }
-  /* how layer 1 works: compact step flow */
-  .l1-flow {
-    margin-top: 30px;
+  /* ---------- how it works ---------- */
+  .how-flow {
+    margin-top: 56px;
     display: grid; grid-template-columns: repeat(4, 1fr) ; gap: 0;
     border: 1px solid var(--edge); border-radius: var(--r);
     background: linear-gradient(180deg, var(--steel), var(--iron));
     overflow: hidden;
   }
-  .l1-step { padding: 20px 22px; position: relative; }
-  .l1-step + .l1-step { border-left: 1px solid var(--edge); }
-  .l1-step .k {
+  .how-step { padding: 20px 22px; position: relative; }
+  .how-step + .how-step { border-left: 1px solid var(--edge); }
+  .how-step .k {
     font-family: "JetBrains Mono", monospace; font-size: 0.66rem;
     letter-spacing: 0.18em; text-transform: uppercase; color: var(--brass); margin-bottom: 9px;
   }
-  .l1-step .k b { color: var(--rivet); margin-right: 8px; font-weight: 500; }
-  .l1-step h4 { font-family: "Cinzel", serif; font-size: 1rem; font-weight: 600; margin-bottom: 6px; }
-  .l1-step p { color: var(--ash-2); font-weight: 300; font-size: 0.84rem; line-height: 1.55; }
-  .l1-step p code {
+  .how-step .k b { color: var(--rivet); margin-right: 8px; font-weight: 500; }
+  .how-step h4 { font-family: "Cinzel", serif; font-size: 1rem; font-weight: 600; margin-bottom: 6px; }
+  .how-step p { color: var(--ash-2); font-weight: 300; font-size: 0.84rem; line-height: 1.55; }
+  .how-step p code {
     font-family: "JetBrains Mono", monospace; font-size: 0.78em;
     color: var(--blade); background: rgba(127,166,191,0.08); padding: 1px 4px; border-radius: 2px;
   }
   @media (max-width: 760px) {
-    .l1-flow { grid-template-columns: 1fr; }
-    .l1-step + .l1-step { border-left: none; border-top: 1px solid var(--edge); }
+    .how-flow { grid-template-columns: 1fr; }
+    .how-step + .how-step { border-left: none; border-top: 1px solid var(--edge); }
   }
 
   /* ---------- features ---------- */
@@ -473,7 +438,7 @@
     <span>Staleguard</span>
   </a>
   <div class="nav-links">
-    <a href="#layers">Layers</a>
+    <a href="#how">How it works</a>
     <a href="#detect">Detects</a>
     <a href="#install">Install</a>
     <a class="nav-gh" href="https://github.com/Arthur920/Staleguard" target="_blank" rel="noopener">GitHub ↗</a>
@@ -500,40 +465,29 @@
 
 <div class="divider"></div>
 
-<!-- LAYERS -->
-<section id="layers" class="wrap">
-  <p class="eyebrow reveal">The architecture</p>
+<!-- HOW IT WORKS -->
+<section id="how" class="wrap">
+  <p class="eyebrow reveal">How it works</p>
   <h2 class="section-title reveal">Deterministic, from docs to verdict</h2>
-  <p class="section-lead reveal">No models, no network: every check is deterministic, instant, and tuned to under-report rather than false-alarm. Everything runs locally, and code never leaves the machine.</p>
+  <p class="section-lead reveal">No models, no network: every check is deterministic, fast (~1.2s on 330k LOC), and tuned to under-report rather than false-alarm. Everything runs locally, and code never leaves the machine.</p>
 
-  <div class="layers-grid stagger">
-    <div class="layer l1">
-      <div class="layer-num">I</div>
-      <div class="layer-body">
-        <h3>Deterministic</h3>
-        <p>Paths exist? Commands real? Env vars and flags read? Code symbols defined? It uses no ML, and every finding names a concrete path, script, env var, or symbol.</p>
-      </div>
-      <div class="layer-meta">instant · no model<span class="accent">~1.2s on 330k LOC</span></div>
-    </div>
-  </div>
-
-  <div class="l1-flow reveal">
-    <div class="l1-step">
+  <div class="how-flow reveal">
+    <div class="how-step">
       <div class="k"><b>01</b>Read docs</div>
       <h4>Extract claims</h4>
       <p>Scan every doc and agent rule for concrete assertions: paths, commands, env vars, flags, and code symbols.</p>
     </div>
-    <div class="l1-step">
+    <div class="how-step">
       <div class="k"><b>02</b>Read code</div>
       <h4>Index with tree-sitter</h4>
       <p>Parse the repo in parallel into a ground-truth index: symbols and references.</p>
     </div>
-    <div class="l1-step">
+    <div class="how-step">
       <div class="k"><b>03</b>Compare</div>
       <h4>Resolve each claim</h4>
       <p>Check every claim against the index. Each claim either resolves or it doesn't.</p>
     </div>
-    <div class="l1-step">
+    <div class="how-step">
       <div class="k"><b>04</b>Report</div>
       <h4>Only provable misses</h4>
       <p>Emit a finding only when the code contradicts the doc, each with the exact doc reference and code anchor.</p>

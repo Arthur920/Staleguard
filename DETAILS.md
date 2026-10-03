@@ -94,7 +94,7 @@ claims are `warning`. `--min-severity error` is the strictest gate.
 
 ```toml
 exclude = ["docs/legacy/**", "NOTES.md"]  # doc globs to skip
-suppress = ["unverifiable"]               # contradicted | stale | unverifiable
+suppress = ["unverifiable"]               # stale | unverifiable
 min_severity = "error"                    # note < warning < error; --min-severity overrides
 ```
 

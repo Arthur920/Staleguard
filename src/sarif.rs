@@ -55,10 +55,6 @@ fn rule_descriptors() -> Value {
             "A doc references a path, command, symbol, env var, or flag that no longer exists in the code.",
         ),
         (
-            Verdict::Contradicted,
-            "A doc claim disagrees with what the code actually does.",
-        ),
-        (
             Verdict::Unverifiable,
             "A doc claim could not be confirmed or refuted from the code.",
         ),
@@ -137,6 +133,6 @@ mod tests {
         assert_eq!(sarif["version"], "2.1.0");
         assert!(sarif["runs"][0]["tool"]["driver"]["rules"]
             .as_array()
-            .is_some_and(|r| r.len() == 3));
+            .is_some_and(|r| r.len() == 2));
     }
 }

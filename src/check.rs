@@ -1,6 +1,6 @@
 //! The per-doc detector pipeline.
 //!
-//! Every deterministic Layer-1 detector that runs *per documentation file* shares
+//! Every detector that runs *per documentation file* shares
 //! one shape, `(doc text, doc-relative path, some repo-wide grounding) -> findings`,
 //! so they are expressed here as a uniform [`DocCheck`] trait over a shared
 //! [`CheckContext`]. The orchestrator in `main.rs` builds the context once, then

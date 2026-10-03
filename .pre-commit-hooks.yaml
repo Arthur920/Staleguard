@@ -5,13 +5,12 @@
 #     hooks:
 #       - id: staleguard
 #
-# The hook runs the deterministic Layer-1 check whenever a Markdown doc changes.
-# It scans the whole repo (drift is a doc-vs-code question, not a per-file one),
-# but only triggers when a doc is actually touched.
+# The hook runs on every commit: drift usually comes from a code change (a
+# rename, a deleted script), not a doc edit, so it scans the whole repo.
 - id: staleguard
   name: staleguard (doc drift)
   description: Check docs against code for coherence drift.
   entry: staleguard check
   language: rust
-  files: \.(md|markdown)$
+  always_run: true
   pass_filenames: false

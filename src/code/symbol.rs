@@ -1,7 +1,6 @@
 //! Types produced by the code extractor.
 //!
-//! These are the substrate every designed feature reads from: coverage gaps,
-//! diagram edge-diff, architecture rules, drift provenance/fingerprints.
+//! The code index is a flat list of these; doc references resolve against it.
 
 use serde::Serialize;
 
@@ -46,16 +45,13 @@ pub struct Span {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Symbol {
     /// module path + enclosing scope + name, best-effort (no full scope
-    /// resolution yet). Symbol identity for coverage-gaps is `(module, name, kind)`.
+    /// resolution yet).
     pub qualified_name: String,
     pub name: String,
     pub kind: SymbolKind,
     pub visibility: Visibility,
     /// file-derived module path (e.g. `src/code/symbol` for this file).
     pub module: String,
-    /// Name range (identifier position), used by reports and coverage.
+    /// Name range (identifier position), used by reports.
     pub span: Span,
-    pub signature: Option<String>,
-    /// leading-comment documentation captured by the tags query, if any.
-    pub doc: Option<String>,
 }

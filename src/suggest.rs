@@ -2,7 +2,7 @@
 //! rather than a hunt: a missing path's git rename (or the one file elsewhere
 //! with the same name), and the closest defined script or code identifier for
 //! a missing script or env var. Hints only touch `detail`, never the claim or
-//! provenance, so drift fingerprints are unaffected.
+//! provenance, so `--diff` still matches findings by claim.
 
 use std::collections::{HashMap, HashSet};
 use std::path::Path;

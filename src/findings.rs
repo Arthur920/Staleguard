@@ -36,8 +36,6 @@ impl Severity {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Verdict {
-    /// doc claim disagrees with code
-    Contradicted,
     /// doc refers to something that no longer exists
     Stale,
     /// could not gather evidence either way
@@ -49,7 +47,6 @@ pub enum Verdict {
 impl Verdict {
     pub fn as_str(&self) -> &'static str {
         match self {
-            Verdict::Contradicted => "contradicted",
             Verdict::Stale => "stale",
             Verdict::Unverifiable => "unverifiable",
             Verdict::Supported => "supported",
@@ -66,7 +63,7 @@ impl Verdict {
     /// ever touches reportable findings.
     pub fn severity(&self) -> Severity {
         match self {
-            Verdict::Contradicted | Verdict::Stale => Severity::Error,
+            Verdict::Stale => Severity::Error,
             Verdict::Unverifiable => Severity::Warning,
             Verdict::Supported => Severity::Note,
         }

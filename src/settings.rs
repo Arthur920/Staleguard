@@ -13,7 +13,7 @@
 //!
 //! # Verdict categories to drop from the report (and from the failing set), for
 //! # teams that opt out of a whole class of finding. One or more of:
-//! # "contradicted", "stale", "unverifiable".
+//! # "stale", "unverifiable".
 //! suppress = ["unverifiable"]
 //!
 //! # Drop findings below this severity from the report, SARIF, and failing set.
@@ -68,7 +68,6 @@ impl Settings {
         self.suppress
             .iter()
             .filter_map(|s| match s.to_ascii_lowercase().as_str() {
-                "contradicted" => Some(Verdict::Contradicted),
                 "stale" => Some(Verdict::Stale),
                 "unverifiable" => Some(Verdict::Unverifiable),
                 _ => None,

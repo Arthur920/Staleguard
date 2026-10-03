@@ -1,7 +1,6 @@
 //! Pull verifiable claims out of markdown docs.
 //!
-//! For now this only surfaces the deterministically checkable claims (paths).
-//! Layer-3 free-text claim extraction (LLM) plugs in alongside these.
+//! Only deterministically checkable claims (paths) are surfaced.
 
 use std::sync::OnceLock;
 

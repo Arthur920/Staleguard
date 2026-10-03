@@ -73,8 +73,8 @@ fn symbols(
         let qualified_name = format!("{module}::{name}");
         let mut kind = map_kind(config.syntax_type_name(tag.syntax_type_id));
         let start_row = tag.span.start.row;
-        let decl_line = lines.get(start_row).map(|l| l.trim().to_string());
-        let visibility = classify_visibility(language, decl_line.as_deref().unwrap_or(""), &name);
+        let decl_line = lines.get(start_row).map_or("", |l| l.trim());
+        let visibility = classify_visibility(language, decl_line, &name);
 
         let span = Span {
             path: rel.to_string(),
@@ -100,8 +100,6 @@ fn symbols(
             visibility,
             module: module.to_string(),
             span,
-            signature: decl_line,
-            doc: tag.docs.clone(),
         });
     }
     symbols
